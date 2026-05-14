@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/map-domain",
+    "crates/map-io",
+    "crates/map-app",
+]
+resolver = "2"

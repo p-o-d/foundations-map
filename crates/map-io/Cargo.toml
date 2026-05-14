@@ -1,0 +1,11 @@
+[package]
+name = "map-io"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+map-domain = { path = "../map-domain" }
+quick-xml = "0.36"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
