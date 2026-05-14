@@ -112,6 +112,20 @@ fn entities_in_sector(world: &World, sector: SectorId) -> &[EntityId];
 fn build_search_index(universe: &Universe, world: &World) -> SearchIndex;
 ```
 
+### Reactivity
+
+The side panel (and any other UI reading live data) must reflect changes in the data model as soon as they happen — no manual refresh, no polling from the UI side.
+
+**Mechanism:**
+
+- `World` is wrapped in `Arc<RwLock<World>>` shared between the IO thread and the UI thread
+- The `map-io` live client writes updates on its own thread (acquiring write lock per poll cycle)
+- After each write, the client calls `egui::Context::request_repaint()` to wake the render loop
+- The UI thread reads a snapshot via read lock at the start of each frame — panel always shows current state
+- `map-domain` itself has no knowledge of this mechanism; `Arc<RwLock<>>` is wired in `map-app`
+
+**Consequence:** any component that displays live data (ship counts, object positions, connection status) is automatically up-to-date each frame after a repaint is triggered. No pub/sub, no channels for UI updates — egui's immediate mode makes the data model the single source of truth.
+
 ### View State Machine
 
 ```rust
