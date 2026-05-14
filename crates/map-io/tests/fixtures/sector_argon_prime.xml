@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<macros>
+  <macro name="Cluster_01_Sector001_macro" class="sector">
+    <component ref="standardsector"/>
+    <connections>
+      <connection ref="standardzone">
+        <macro ref="Cluster_01_Sector001_Zone001_macro" connection="zone"/>
+        <offset><position x="0" y="0" z="0"/></offset>
+      </connection>
+    </connections>
+  </macro>
+
+  <macro name="Cluster_01_Sector001_Zone001_macro" class="zone">
+    <component ref="standardzone"/>
+    <connections>
+      <connection ref="object" name="station_argon_tradingstation">
+        <macro ref="station_tra_arg_xl_01_macro" connection="object"/>
+        <offset><position x="100000" y="0" z="-200000"/></offset>
+        <properties>
+          <identification name="Argon Prime Trading Station"/>
+          <owner exact="argon"/>
+          <type class="station"/>
+        </properties>
+      </connection>
+      <connection ref="object" name="gate_argon_to_hatikvah">
+        <macro ref="standardgate" connection="object"/>
+        <offset><position x="-3000000" y="0" z="1500000"/></offset>
+        <properties>
+          <identification name="Gate to Hatikvah's Choice I"/>
+          <type class="gate"/>
+        </properties>
+      </connection>
+      <connection ref="object" name="resourcezone_silicon_01">
+        <macro ref="resourcezone_silicon_macro" connection="object"/>
+        <offset><position x="2000000" y="200000" z="-800000"/></offset>
+        <properties>
+          <identification name="Silicon Field Alpha"/>
+          <type class="resourcezone"/>
+        </properties>
+      </connection>
+    </connections>
+  </macro>
+</macros>

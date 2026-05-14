@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<macros>
+  <macro name="xu_ep2_universe_macro" class="galaxy">
+    <component ref="standardgalaxy"/>
+    <connections>
+      <connection name="Cluster_01" ref="standardcluster">
+        <macro ref="Cluster_01_macro" connection="cluster"/>
+        <offset><position x="-10000000" y="0" z="5000000"/></offset>
+      </connection>
+      <connection name="Cluster_09" ref="standardcluster">
+        <macro ref="Cluster_09_macro" connection="cluster"/>
+        <offset><position x="5000000" y="0" z="-2000000"/></offset>
+      </connection>
+    </connections>
+  </macro>
+
+  <macro name="Cluster_01_macro" class="cluster">
+    <component ref="standardcluster"/>
+    <connections>
+      <connection name="Cluster_01_Sector001" ref="standardsector">
+        <macro ref="Cluster_01_Sector001_macro" connection="sector"/>
+      </connection>
+    </connections>
+  </macro>
+
+  <macro name="Cluster_01_Sector001_macro" class="sector">
+    <component ref="standardsector"/>
+    <properties>
+      <identification name="Argon Prime" description="Heart of Argon space"/>
+      <owner exact="argon"/>
+    </properties>
+  </macro>
+
+  <macro name="Cluster_09_macro" class="cluster">
+    <component ref="standardcluster"/>
+    <connections>
+      <connection name="Cluster_09_Sector001" ref="standardsector">
+        <macro ref="Cluster_09_Sector001_macro" connection="sector"/>
+      </connection>
+    </connections>
+  </macro>
+
+  <macro name="Cluster_09_Sector001_macro" class="sector">
+    <component ref="standardsector"/>
+    <properties>
+      <identification name="Hatikvah's Choice I" description="A prosperous trading sector"/>
+      <owner exact="hatikvah"/>
+    </properties>
+  </macro>
+</macros>
