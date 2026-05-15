@@ -3,7 +3,8 @@ mod theme;
 pub mod ui;
 
 fn main() -> eframe::Result<()> {
-    let universe = map_domain::universe::Universe::default();
+    // Attempt to load universe from game files
+    let universe = load_universe();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -18,4 +19,31 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| Ok(Box::new(app::App::new(cc, universe)))),
     )
+}
+
+fn load_universe() -> map_domain::universe::Universe {
+    let game_path = map_io::game_path::detect();
+
+    let Some(game_dir) = game_path else {
+        eprintln!("[map] Game path not found — starting with empty universe.");
+        return map_domain::universe::Universe::default();
+    };
+
+    eprintln!("[map] Found game at: {:?}", game_dir);
+
+    let galaxy_xml = game_dir
+        .join("maps")
+        .join("xu_ep2_universe")
+        .join("galaxy.xml");
+
+    match map_io::xml_parser::parse_galaxy(&galaxy_xml) {
+        Ok(universe) => {
+            eprintln!("[map] Loaded {} sectors.", universe.sectors.len());
+            universe
+        }
+        Err(e) => {
+            eprintln!("[map] Failed to parse galaxy.xml: {:?}", e);
+            map_domain::universe::Universe::default()
+        }
+    }
 }
