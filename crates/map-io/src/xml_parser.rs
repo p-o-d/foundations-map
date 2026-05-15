@@ -203,6 +203,33 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] Non-gate objects loaded: {}", non_gate_counter);
 
+    // Parse fixed objects from god.xml (main + all DLC extensions).
+    // Uses read_all_game_files since extensions supply additional god.xml entries.
+    let mut god_counter = 0u32;
+    let mut sector_macro_to_id: HashMap<String, SectorId> = macro_to_id
+        .iter()
+        .map(|(k, v)| (k.to_lowercase(), *v))
+        .collect();
+    for god_data in crate::cat_reader::read_all_game_files(game_dir, "libraries/god.xml") {
+        let god_str = String::from_utf8_lossy(&god_data);
+        for (sec_lower, x, y, z, kind, name) in parse_god_xml(&god_str) {
+            if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
+                if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
+                    god_counter += 1;
+                    sector.static_objects.push(StaticObject {
+                        id:       ObjectId(30_000 + god_counter),
+                        kind,
+                        position: Vec3::new(x, y, z),
+                        faction:  None,
+                        name,
+                        rotation: None,
+                    });
+                }
+            }
+        }
+    }
+    eprintln!("[map] God objects loaded: {}", god_counter);
+
     Ok(Universe { sectors, connections })
 }
 
@@ -689,6 +716,75 @@ pub fn zone_name_to_sector_macro(name: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Extract sector macro (lowercase) from a zone macro name.
+/// `"zone001_cluster_05_sector001_macro"` → `"cluster_05_sector001_macro"`
+fn zone_macro_to_sector_lower(mac: &str) -> Option<String> {
+    let lower = mac.to_lowercase();
+    lower.find("cluster_").map(|pos| lower[pos..].to_string())
+}
+
+/// god.xml: fixed object placements.
+/// Returns (sector_macro_lowercase, x_km, y_km, z_km, kind, display_name).
+fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, String)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result = Vec::new();
+    let mut in_obj    = false;
+    let mut loc_sec:  Option<String>         = None;
+    let mut obj_pos:  Option<(f32, f32, f32)> = None;
+    let mut obj_mac:  Option<String>          = None;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => {
+                if e.name().as_ref() == b"object" && attr_value(e, b"id").is_some() {
+                    in_obj  = true;
+                    loc_sec = None;
+                    obj_pos = None;
+                    obj_mac = None;
+                }
+            }
+            Ok(Event::Empty(ref e)) if in_obj => match e.name().as_ref() {
+                b"location" => {
+                    let cls = attr_value(e, b"class").unwrap_or_default();
+                    let mac = attr_value(e, b"macro").unwrap_or_default();
+                    loc_sec = if cls == "sector" {
+                        Some(mac.to_lowercase())
+                    } else {
+                        zone_macro_to_sector_lower(&mac)
+                    };
+                }
+                b"position" => {
+                    let x: f32 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    let y: f32 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    let z: f32 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    obj_pos = Some((x / 1000.0, y / 1000.0, z / 1000.0));
+                }
+                b"object" => {
+                    obj_mac = attr_value(e, b"macro");
+                }
+                _ => {}
+            },
+            Ok(Event::End(ref e)) => {
+                if e.name().as_ref() == b"object" && in_obj {
+                    if let (Some(sec), Some((x, y, z)), Some(mac)) =
+                        (loc_sec.take(), obj_pos.take(), obj_mac.take())
+                    {
+                        result.push((sec, x, y, z, classify_static_object(&mac), macro_to_display_name(&mac)));
+                    }
+                    in_obj = false;
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
 }
 
 /// Classify a static object by its macro reference name.
