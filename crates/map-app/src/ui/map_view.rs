@@ -100,6 +100,26 @@ impl MapView {
             }
         }
 
+        // Pan: drag anywhere on the map
+        if response.dragged() {
+            self.pan += response.drag_delta();
+        }
+
+        // Zoom: scroll wheel, zooming toward pointer position
+        if let Some(hover_pos) = response.hover_pos() {
+            let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll_delta != 0.0 {
+                let zoom_factor = (scroll_delta * 0.001).exp();
+                let old_zoom = self.zoom;
+                self.zoom = (self.zoom * zoom_factor).clamp(20.0, 400.0);
+                // Adjust pan so zoom targets the pointer position
+                let center = rect.center();
+                let mouse_offset = hover_pos - center;
+                let scale_change = self.zoom / old_zoom;
+                self.pan = mouse_offset + (self.pan - mouse_offset) * scale_change;
+            }
+        }
+
         MapViewResponse { clicked_sector, double_clicked_sector, response }
     }
 }
