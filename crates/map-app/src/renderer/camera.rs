@@ -49,12 +49,11 @@ impl OrbitCamera {
             self.distance = 100.0;
             return;
         }
-        let center = positions.iter().copied().sum::<Vec3>() / positions.len() as f32;
         let max_r = positions
             .iter()
-            .map(|p| (*p - center).length())
+            .map(|p| p.length())
             .fold(0.0f32, f32::max);
-        self.target = center;
+        self.target = Vec3::ZERO;
         self.distance = ((max_r + 1.0) / 30f32.to_radians().tan()).max(10.0);
         self.yaw = 0.0;
         self.pitch = 0.3;

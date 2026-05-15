@@ -184,7 +184,7 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
     let vp  = camera.proj_matrix(aspect) * camera.view_matrix();
     let arm = camera.distance * 0.15;
 
-    let center = camera.target;
+    let center = Vec3::ZERO;
     let axes: &[(&str, Vec3, egui::Color32)] = &[
         ("E",  center + Vec3::new( arm, 0.0,  0.0), egui::Color32::from_rgb(220,  80,  80)),
         ("W",  center + Vec3::new(-arm, 0.0,  0.0), egui::Color32::from_rgb(160,  50,  50)),
