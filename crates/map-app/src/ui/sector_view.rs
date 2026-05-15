@@ -105,6 +105,9 @@ impl SectorView3D {
         );
         ui.painter().add(cb);
 
+        // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
+        draw_axis_arrows(ui.painter(), view_rect, camera);
+
         // Border around canvas
         ui.painter().rect_stroke(canvas_rect, 2.0, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Outside);
 
@@ -172,4 +175,57 @@ fn pick_object(
         }
     }
     best_id
+}
+
+/// Draw 6 direction arrows from sector origin: E(+X), W(-X), Up(+Y), Dn(-Y), N(-Z), S(+Z).
+/// Arrow length scales with camera distance so they remain visible at all zoom levels.
+fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera) {
+    let aspect = view_rect.width() / view_rect.height().max(1.0);
+    let vp  = camera.proj_matrix(aspect) * camera.view_matrix();
+    let arm = camera.distance * 0.15;
+
+    let axes: &[(&str, Vec3, egui::Color32)] = &[
+        ("E",  Vec3::new( arm, 0.0,  0.0), egui::Color32::from_rgb(220,  80,  80)),
+        ("W",  Vec3::new(-arm, 0.0,  0.0), egui::Color32::from_rgb(160,  50,  50)),
+        ("Up", Vec3::new(0.0,  arm,  0.0), egui::Color32::from_rgb( 80, 220,  80)),
+        ("Dn", Vec3::new(0.0, -arm,  0.0), egui::Color32::from_rgb( 50, 130,  50)),
+        ("N",  Vec3::new(0.0, 0.0, -arm),  egui::Color32::from_rgb( 80, 180, 220)),
+        ("S",  Vec3::new(0.0, 0.0,  arm),  egui::Color32::from_rgb(220, 140,  50)),
+    ];
+
+    let project = |world: Vec3| -> Option<Pos2> {
+        let clip = vp * world.extend(1.0);
+        if clip.w <= 0.0 { return None; }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        Some(Pos2::new(
+            (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
+        ))
+    };
+
+    let Some(origin) = project(Vec3::ZERO) else { return };
+
+    for (label, end_world, color) in axes {
+        let Some(end) = project(*end_world) else { continue };
+        painter.line_segment([origin, end], egui::Stroke::new(2.0, *color));
+
+        // Arrowhead triangle
+        let dir  = (end - origin).normalized();
+        let perp = Vec2::new(-dir.y, dir.x);
+        painter.add(egui::Shape::convex_polygon(
+            vec![end, end - dir * 8.0 + perp * 4.0, end - dir * 8.0 - perp * 4.0],
+            *color,
+            egui::Stroke::NONE,
+        ));
+
+        // Label just beyond arrowhead
+        painter.text(
+            end + dir * 10.0,
+            egui::Align2::CENTER_CENTER,
+            *label,
+            egui::FontId::monospace(10.0),
+            *color,
+        );
+    }
 }
