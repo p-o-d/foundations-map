@@ -244,6 +244,8 @@ pub fn parse_galaxy(path: &Path) -> Result<Universe, ParseError> {
     // Join tables → sectors
     let mut sectors = Vec::new();
     let mut id_counter = 0u32;
+    let mut faction_ids: HashMap<String, FactionId> = HashMap::new();
+    let mut next_faction_id: u32 = 0;
 
     for (sector_macro, cluster_name) in &sector_to_cluster {
         let (name, faction_str) = sector_props
@@ -259,7 +261,12 @@ pub fn parse_galaxy(path: &Path) -> Result<Universe, ParseError> {
         let map_position = Vec2::new(x / 1_000_000.0, z / 1_000_000.0);
 
         id_counter += 1;
-        let faction = faction_str.map(|_| FactionId(id_counter));
+        let faction = faction_str.map(|name| {
+            *faction_ids.entry(name).or_insert_with(|| {
+                next_faction_id += 1;
+                FactionId(next_faction_id)
+            })
+        });
 
         sectors.push(Sector {
             id: SectorId(id_counter),
@@ -288,6 +295,8 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
 
     let mut objects: Vec<StaticObject> = Vec::new();
     let mut id_counter = 0u32;
+    let mut faction_ids: HashMap<String, FactionId> = HashMap::new();
+    let mut next_faction_id: u32 = 0;
 
     let mut in_zone_macro = false;
     let mut in_object_conn = false;
@@ -375,7 +384,12 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
                             pending_kind.take(),
                         ) {
                             id_counter += 1;
-                            let faction = pending_faction.take().map(|_| FactionId(id_counter));
+                            let faction = pending_faction.take().map(|name| {
+                                *faction_ids.entry(name).or_insert_with(|| {
+                                    next_faction_id += 1;
+                                    FactionId(next_faction_id)
+                                })
+                            });
                             objects.push(StaticObject {
                                 id: ObjectId(id_counter),
                                 kind,

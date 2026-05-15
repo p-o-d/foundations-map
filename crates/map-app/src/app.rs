@@ -41,6 +41,9 @@ impl eframe::App for App {
                 if panel_resp.open_3d_clicked {
                     self.view_mode = self.view_mode.clone().open_sector_3d();
                 }
+                if panel_resp.back_to_map_clicked {
+                    self.view_mode = self.view_mode.clone().close_sector_3d();
+                }
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {

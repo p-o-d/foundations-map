@@ -3,6 +3,7 @@ use crate::theme;
 
 pub struct SectorPanelResponse {
     pub open_3d_clicked: bool,
+    pub back_to_map_clicked: bool,
 }
 
 #[derive(Default)]
@@ -21,8 +22,11 @@ impl SectorPanel {
             ui.colored_label(theme::TEXT_MUTED, "Select a sector");
             ui.add_space(4.0);
             ui.colored_label(theme::TEXT_MUTED, "Click on the map.");
-            return SectorPanelResponse { open_3d_clicked: false };
+            return SectorPanelResponse { open_3d_clicked: false, back_to_map_clicked: false };
         };
+
+        let back_clicked = ui.small_button("← Universe").clicked();
+        ui.add_space(4.0);
 
         // Name + faction
         ui.colored_label(theme::TEXT_MUTED, "SECTOR");
@@ -40,12 +44,12 @@ impl SectorPanel {
         ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
         ui.add_space(4.0);
         let neighbours = universe.neighbour_ids(sector.id);
+        let conns = universe.connections_for(sector.id);
         if neighbours.is_empty() {
             ui.colored_label(theme::TEXT_MUTED, "None");
         }
         for nb_id in &neighbours {
             if let Some(nb) = universe.sector(*nb_id) {
-                let conns = universe.connections_for(sector.id);
                 let gate_type = conns.iter()
                     .find(|c| c.from == *nb_id || c.to == *nb_id)
                     .map(|c| &c.gate_type);
@@ -69,7 +73,7 @@ impl SectorPanel {
         ui.add_space(12.0);
 
         let open_clicked = ui.button("▣  Open 3D View").clicked();
-        SectorPanelResponse { open_3d_clicked: open_clicked }
+        SectorPanelResponse { open_3d_clicked: open_clicked, back_to_map_clicked: back_clicked }
     }
 }
 
