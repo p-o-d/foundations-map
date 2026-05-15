@@ -103,9 +103,6 @@ impl eframe::App for App {
                             .unwrap_or_default();
                         self.camera.fit_all(&positions);
                     }
-                    // Dim the background
-                    let map_rect = ui.max_rect();
-                    ui.painter().rect_filled(map_rect, 0.0, egui::Color32::from_black_alpha(180));
                 }
                 ViewMode::UniverseMap { .. } => {
                     let mvr = self.map_view.show(ui, &self.universe, selected);

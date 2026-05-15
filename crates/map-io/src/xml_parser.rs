@@ -129,11 +129,19 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         })
         .collect();
 
-    // Parse gate positions and populate sectors
-    let gate_positions = parse_gate_positions_xml(&zones_str);
+    // Parse gate positions and populate sectors.
+    // Keys from parse_gate_positions_xml come from zones.xml zone names; id_to_macro keys come
+    // from clusters.xml. DLC sectors may differ in casing — normalise both to lowercase.
+    let gate_positions: HashMap<String, Vec<(f32, f32, f32, String)>> =
+        parse_gate_positions_xml(&zones_str)
+            .into_iter()
+            .map(|(k, v)| (k.to_lowercase(), v))
+            .collect();
     let mut gate_obj_counter = 0u32;
     for sector in &mut sectors {
-        if let Some(gates) = id_to_macro.get(&sector.id).and_then(|m| gate_positions.get(m)) {
+        if let Some(gates) = id_to_macro.get(&sector.id)
+            .and_then(|m| gate_positions.get(&m.to_lowercase()))
+        {
             for (x, y, z, dest_name) in gates {
                 gate_obj_counter += 1;
                 sector.static_objects.push(StaticObject {
