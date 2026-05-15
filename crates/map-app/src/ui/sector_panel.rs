@@ -76,6 +76,15 @@ impl SectorPanel {
                     "x {:.1}  y {:.1}  z {:.1} km",
                     obj.position.x, obj.position.y, obj.position.z
                 ));
+                if let Some(f) = obj.faction {
+                    ui.colored_label(theme::TEXT_MUTED, format!("Faction #{}", f.0));
+                }
+                if let Some((pitch, yaw, roll)) = obj.rotation {
+                    ui.colored_label(theme::TEXT_MUTED, format!(
+                        "pitch {:.1}°  yaw {:.1}°  roll {:.1}°",
+                        pitch, yaw, roll
+                    ));
+                }
             }
         } else {
             ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");

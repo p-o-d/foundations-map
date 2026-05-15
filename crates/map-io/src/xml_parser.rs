@@ -132,7 +132,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     // Parse gate positions and populate sectors.
     // Keys from parse_gate_positions_xml come from zones.xml zone names; id_to_macro keys come
     // from clusters.xml. DLC sectors may differ in casing — normalise both to lowercase.
-    let gate_positions: HashMap<String, Vec<(f32, f32, f32, String)>> =
+    let gate_positions: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> =
         parse_gate_positions_xml(&zones_str)
             .into_iter()
             .map(|(k, v)| (k.to_lowercase(), v))
@@ -158,7 +158,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         if let Some(gates) = id_to_macro.get(&sector.id)
             .and_then(|m| gate_positions.get(&m.to_lowercase()))
         {
-            for (x, y, z, dest_name) in gates {
+            for (x, y, z, dest_name, rot) in gates {
                 gate_obj_counter += 1;
                 let gate_name = parse_gate_cluster_nums(dest_name)
                     .and_then(|(_, to_n)| cluster_num_to_name.get(&to_n))
@@ -170,6 +170,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                     position: Vec3::new(*x, *y, *z),
                     faction:  None,
                     name:     gate_name,
+                    rotation: Some(*rot),
                 });
             }
         }
@@ -566,16 +567,17 @@ fn parse_gate_connections_xml(
 ///
 /// Gate connections are named `connection_ClusterGate{N}To{M}`.
 /// Their `<offset><position x y z />` is in metres; we divide by 1000 to get km.
-fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, String)>> {
+fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
-    let mut result: HashMap<String, Vec<(f32, f32, f32, String)>> = HashMap::new();
+    let mut result: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> = HashMap::new();
     let mut current_sector: Option<String> = None;
     let mut in_gate_conn = false;
     let mut in_offset = false;
     let mut gate_dest: Option<String> = None;
     let mut gate_pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
+    let mut gate_rot: (f32, f32, f32) = (0.0, 0.0, 0.0);
     let mut buf = Vec::new();
 
     loop {
@@ -594,6 +596,7 @@ fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, St
                     if parse_gate_cluster_nums(&conn_name).is_some() {
                         in_gate_conn = true;
                         gate_pos = (0.0, 0.0, 0.0);
+                        gate_rot = (0.0, 0.0, 0.0);
                         gate_dest = Some(conn_name);
                     }
                 }
@@ -601,10 +604,20 @@ fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, St
                 _ => {}
             },
             Ok(Event::Empty(ref e)) => {
-                if e.name().as_ref() == b"position" && in_offset {
-                    gate_pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    gate_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    gate_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                if in_offset {
+                    match e.name().as_ref() {
+                        b"position" => {
+                            gate_pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            gate_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            gate_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                        }
+                        b"rotation" => {
+                            gate_rot.0 = attr_value(e, b"pitch").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            gate_rot.1 = attr_value(e, b"yaw").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            gate_rot.2 = attr_value(e, b"roll").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                        }
+                        _ => {}
+                    }
                 }
             }
             Ok(Event::End(ref e)) => match e.name().as_ref() {
@@ -616,6 +629,7 @@ fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, St
                             gate_pos.1 / 1000.0,
                             gate_pos.2 / 1000.0,
                             dest,
+                            gate_rot,
                         ));
                     }
                     in_gate_conn = false;
@@ -1003,6 +1017,7 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
                                 position: pos,
                                 faction,
                                 name,
+                                rotation: None,
                             });
                         }
                         in_object_conn = false;

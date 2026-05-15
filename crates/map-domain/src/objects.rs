@@ -16,6 +16,8 @@ pub struct StaticObject {
     pub position: Vec3,
     pub faction: Option<FactionId>,
     pub name: String,
+    /// Gate orientation (pitch, yaw, roll) in degrees from zones.xml.
+    pub rotation: Option<(f32, f32, f32)>,
 }
 
 #[cfg(test)]
@@ -30,6 +32,7 @@ mod tests {
             position: Vec3::new(100.0, 0.0, -200.0),
             faction: Some(FactionId(1)),
             name: "Argon Prime Trading Station".into(),
+            rotation: None,
         };
         assert_eq!(obj.kind, StaticObjectKind::Station);
         assert_eq!(obj.position.x, 100.0);
@@ -43,6 +46,7 @@ mod tests {
             position: Vec3::ZERO,
             faction: None,
             name: "Gate → Hatikvah".into(),
+            rotation: None,
         };
         assert!(gate.faction.is_none());
     }
