@@ -137,6 +137,22 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             .into_iter()
             .map(|(k, v)| (k.to_lowercase(), v))
             .collect();
+    // cluster_num → first sector display name for that cluster, used to label gates.
+    let mut cluster_num_to_name: HashMap<u32, String> = HashMap::new();
+    for sector in &sectors {
+        if let Some(sector_macro) = id_to_macro.get(&sector.id) {
+            if let Some((cluster_macro, ..)) = sector_placements.get(sector_macro) {
+                if let Some(num) = cluster_macro
+                    .strip_prefix("Cluster_")
+                    .and_then(|s| s.strip_suffix("_macro"))
+                    .and_then(|s| s.parse::<u32>().ok())
+                {
+                    cluster_num_to_name.entry(num).or_insert(sector.name.clone());
+                }
+            }
+        }
+    }
+
     let mut gate_obj_counter = 0u32;
     for sector in &mut sectors {
         if let Some(gates) = id_to_macro.get(&sector.id)
@@ -144,12 +160,16 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         {
             for (x, y, z, dest_name) in gates {
                 gate_obj_counter += 1;
+                let gate_name = parse_gate_cluster_nums(dest_name)
+                    .and_then(|(_, to_n)| cluster_num_to_name.get(&to_n))
+                    .map(|s| format!("Gate → {}", s))
+                    .unwrap_or_else(|| dest_name.clone());
                 sector.static_objects.push(StaticObject {
                     id:       ObjectId(10_000 + gate_obj_counter),
                     kind:     StaticObjectKind::Gate,
                     position: Vec3::new(*x, *y, *z),
                     faction:  None,
-                    name:     dest_name.clone(),
+                    name:     gate_name,
                 });
             }
         }

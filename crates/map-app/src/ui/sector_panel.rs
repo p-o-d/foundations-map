@@ -63,6 +63,20 @@ impl SectorPanel {
                     object_clicked = Some(obj.id);
                 }
             }
+
+            if let Some(obj) = selected_obj.and_then(|id| sector.static_objects.iter().find(|o| o.id == id)) {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.colored_label(theme::TEXT_MUTED, "SELECTED");
+                ui.add_space(2.0);
+                ui.colored_label(theme::ACCENT, &obj.name);
+                ui.add_space(2.0);
+                ui.colored_label(theme::TEXT_MUTED, format!(
+                    "x {:.1}  y {:.1}  z {:.1} km",
+                    obj.position.x, obj.position.y, obj.position.z
+                ));
+            }
         } else {
             ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
             ui.add_space(4.0);
