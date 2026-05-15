@@ -83,6 +83,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
 
     let mut sectors = Vec::new();
     let mut macro_to_id: HashMap<String, SectorId> = HashMap::new();
+    let mut id_to_macro: HashMap<SectorId, String> = HashMap::new();
     let mut id_counter = 0u32;
 
     for (sector_macro, (cluster_macro, dx, dz)) in &sector_placements {
@@ -106,6 +107,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         id_counter += 1;
         let id = SectorId(id_counter);
         macro_to_id.insert(sector_macro.clone(), id);
+        id_to_macro.insert(id, sector_macro.clone());
         sectors.push(Sector {
             id,
             name,
@@ -126,6 +128,25 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             })
         })
         .collect();
+
+    // Parse gate positions and populate sectors
+    let gate_positions = parse_gate_positions_xml(&zones_str);
+    let mut gate_obj_counter = 0u32;
+    for sector in &mut sectors {
+        if let Some(gates) = id_to_macro.get(&sector.id).and_then(|m| gate_positions.get(m)) {
+            for (x, y, z, dest_name) in gates {
+                gate_obj_counter += 1;
+                sector.static_objects.push(StaticObject {
+                    id:       ObjectId(10_000 + gate_obj_counter),
+                    kind:     StaticObjectKind::Gate,
+                    position: Vec3::new(*x, *y, *z),
+                    faction:  None,
+                    name:     dest_name.clone(),
+                });
+            }
+        }
+    }
+    eprintln!("[map] Gate objects loaded: {}", gate_obj_counter);
 
     Ok(Universe { sectors, connections })
 }
@@ -513,8 +534,79 @@ fn parse_gate_connections_xml(
     connections
 }
 
+/// zones.xml: sector_macro_name → list of gate positions (x, y, z in km, dest_connection_name).
+///
+/// Gate connections are named `connection_ClusterGate{N}To{M}`.
+/// Their `<offset><position x y z />` is in metres; we divide by 1000 to get km.
+fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, String)>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result: HashMap<String, Vec<(f32, f32, f32, String)>> = HashMap::new();
+    let mut current_sector: Option<String> = None;
+    let mut in_gate_conn = false;
+    let mut in_offset = false;
+    let mut gate_dest: Option<String> = None;
+    let mut gate_pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                b"macro" => {
+                    let class = attr_value(e, b"class").unwrap_or_default();
+                    if class == "zone" {
+                        let name = attr_value(e, b"name").unwrap_or_default();
+                        current_sector = zone_name_to_sector_macro(&name);
+                    }
+                }
+                b"connection" if current_sector.is_some() => {
+                    let conn_name = attr_value(e, b"name").unwrap_or_default();
+                    if parse_gate_cluster_nums(&conn_name).is_some() {
+                        in_gate_conn = true;
+                        gate_pos = (0.0, 0.0, 0.0);
+                        gate_dest = Some(conn_name);
+                    }
+                }
+                b"offset" if in_gate_conn => in_offset = true,
+                _ => {}
+            },
+            Ok(Event::Empty(ref e)) => {
+                if e.name().as_ref() == b"position" && in_offset {
+                    gate_pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    gate_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    gate_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                }
+            }
+            Ok(Event::End(ref e)) => match e.name().as_ref() {
+                b"offset" => in_offset = false,
+                b"connection" if in_gate_conn => {
+                    if let (Some(sector), Some(dest)) = (&current_sector, gate_dest.take()) {
+                        result.entry(sector.clone()).or_default().push((
+                            gate_pos.0 / 1000.0,
+                            gate_pos.1 / 1000.0,
+                            gate_pos.2 / 1000.0,
+                            dest,
+                        ));
+                    }
+                    in_gate_conn = false;
+                }
+                b"macro" => {
+                    current_sector = None;
+                    in_gate_conn = false;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
+}
+
 /// `Zone003_Cluster_01_Sector001_macro` → `Cluster_01_Sector001_macro`
-fn zone_name_to_sector_macro(name: &str) -> Option<String> {
+pub fn zone_name_to_sector_macro(name: &str) -> Option<String> {
     if !name.starts_with("Zone") {
         return None;
     }

@@ -51,3 +51,15 @@ fn parse_sector_objects_positions_are_set() {
     assert_eq!(station.position.x, 100000.0);
     assert_eq!(station.position.z, -200000.0);
 }
+
+#[test]
+fn zone_name_to_sector_macro_extracts_correctly() {
+    assert_eq!(
+        xml_parser::zone_name_to_sector_macro("Zone003_Cluster_01_Sector001_macro"),
+        Some("Cluster_01_Sector001_macro".to_string()),
+    );
+    assert_eq!(
+        xml_parser::zone_name_to_sector_macro("NotAZone"),
+        None,
+    );
+}
