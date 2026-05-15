@@ -105,9 +105,9 @@ impl SectorView3D {
         );
         ui.painter().add(cb);
 
-        // Gate direction arrows drawn on top of 3D scene
+        // Gates drawn as screen-space circles + arrows (constant size, correct orientation)
         if let Some(sec) = sector {
-            draw_gate_arrows(ui.painter(), view_rect, camera, sec);
+            draw_gates_2d(ui.painter(), view_rect, camera, sec);
         }
 
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
@@ -122,7 +122,7 @@ impl SectorView3D {
 
 /// Build per-object draw calls with model matrix (translate + scale) and color.
 fn build_draw_calls(sector: &Sector, selected: Option<ObjectId>) -> Vec<DrawCall> {
-    sector.static_objects.iter().map(|obj| {
+    sector.static_objects.iter().filter(|obj| obj.kind != StaticObjectKind::Gate).map(|obj| {
         let scale = match obj.kind {
             StaticObjectKind::Station      => 3.0,
             StaticObjectKind::Gate         => 4.0,
@@ -243,9 +243,10 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
     }
 }
 
-/// Draw bidirectional arrows through each gate, projected onto screen as a 2D painter overlay.
-/// Arrow direction = gate normal (Y axis rotated by gate orientation).
-fn draw_gate_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera, sector: &Sector) {
+/// Draw gates as screen-space circle outlines + bidirectional arrows at constant pixel size.
+/// Circle radius and arrow length stay fixed in pixels regardless of zoom.
+/// Arrow direction = gate forward (Z axis rotated by gate quaternion → horizontal facing direction).
+fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera, sector: &Sector) {
     let aspect = view_rect.width() / view_rect.height().max(1.0);
     let vp = camera.proj_matrix(aspect) * camera.view_matrix();
 
@@ -260,25 +261,38 @@ fn draw_gate_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
         ))
     };
 
-    let color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 200);
+    let ring_color  = egui::Color32::from_rgba_premultiplied(100, 200, 255, 220);
+    let arrow_color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 200);
+    const RING_R: f32  = 18.0;
+    const ARROW_A: f32 = 28.0; // px from center to arrowhead tip
 
     for obj in &sector.static_objects {
         if obj.kind != StaticObjectKind::Gate { continue; }
 
+        let Some(sc) = project(obj.position) else { continue };
+
+        // Constant-size circle outline
+        painter.circle_stroke(sc, RING_R, egui::Stroke::new(1.5, ring_color));
+
+        // Gate forward = Z rotated by gate orientation (gate stands upright, yaw rotates facing)
         let (pitch, yaw, roll) = obj.rotation.unwrap_or((0.0, 0.0, 0.0));
         let rot = Mat4::from_euler(
             glam::EulerRot::YXZ,
             yaw.to_radians(), pitch.to_radians(), roll.to_radians(),
         );
-        let normal = rot.transform_vector3(Vec3::Y);
-        let arm = 6.0_f32;
+        let forward = rot.transform_vector3(Vec3::Z);
 
-        let Some(s_a) = project(obj.position - normal * arm) else { continue };
-        let Some(s_b) = project(obj.position + normal * arm) else { continue };
+        // Project a point 50 km along forward to get screen-space 2D direction
+        let Some(sf) = project(obj.position + forward * 50.0) else { continue };
+        let screen_dir = (sf - sc).normalized();
+        if screen_dir.length() < 0.01 { continue; }
 
-        painter.line_segment([s_a, s_b], egui::Stroke::new(2.0, color));
-        draw_arrowhead(painter, s_b, s_a, color);
-        draw_arrowhead(painter, s_a, s_b, color);
+        // Arrow at constant pixel length, bidirectional
+        let p_a = sc - screen_dir * ARROW_A;
+        let p_b = sc + screen_dir * ARROW_A;
+        painter.line_segment([p_a, p_b], egui::Stroke::new(1.5, arrow_color));
+        draw_arrowhead(painter, p_b, p_a, arrow_color);
+        draw_arrowhead(painter, p_a, p_b, arrow_color);
     }
 }
 
