@@ -184,13 +184,14 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
     let vp  = camera.proj_matrix(aspect) * camera.view_matrix();
     let arm = camera.distance * 0.15;
 
+    let center = camera.target;
     let axes: &[(&str, Vec3, egui::Color32)] = &[
-        ("E",  Vec3::new( arm, 0.0,  0.0), egui::Color32::from_rgb(220,  80,  80)),
-        ("W",  Vec3::new(-arm, 0.0,  0.0), egui::Color32::from_rgb(160,  50,  50)),
-        ("Up", Vec3::new(0.0,  arm,  0.0), egui::Color32::from_rgb( 80, 220,  80)),
-        ("Dn", Vec3::new(0.0, -arm,  0.0), egui::Color32::from_rgb( 50, 130,  50)),
-        ("N",  Vec3::new(0.0, 0.0, -arm),  egui::Color32::from_rgb( 80, 180, 220)),
-        ("S",  Vec3::new(0.0, 0.0,  arm),  egui::Color32::from_rgb(220, 140,  50)),
+        ("E",  center + Vec3::new( arm, 0.0,  0.0), egui::Color32::from_rgb(220,  80,  80)),
+        ("W",  center + Vec3::new(-arm, 0.0,  0.0), egui::Color32::from_rgb(160,  50,  50)),
+        ("Up", center + Vec3::new(0.0,  arm,  0.0), egui::Color32::from_rgb( 80, 220,  80)),
+        ("Dn", center + Vec3::new(0.0, -arm,  0.0), egui::Color32::from_rgb( 50, 130,  50)),
+        ("N",  center + Vec3::new(0.0, 0.0, -arm),  egui::Color32::from_rgb( 80, 180, 220)),
+        ("S",  center + Vec3::new(0.0, 0.0,  arm),  egui::Color32::from_rgb(220, 140,  50)),
     ];
 
     let project = |world: Vec3| -> Option<Pos2> {
@@ -204,7 +205,7 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
         ))
     };
 
-    let Some(origin) = project(Vec3::ZERO) else { return };
+    let Some(origin) = project(center) else { return };
 
     for (label, end_world, color) in axes {
         let Some(end) = project(*end_world) else { continue };
