@@ -24,17 +24,17 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("top_bar")
-            .exact_height(36.0)
-            .show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::top("top_bar")
+            .exact_size(36.0)
+            .show_inside(ui, |ui| {
                 self.top_bar.show(ui);
             });
 
-        egui::SidePanel::right("sector_panel")
-            .exact_width(220.0)
+        egui::Panel::right("sector_panel")
+            .exact_size(220.0)
             .resizable(false)
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 let selected = self.view_mode.selected_sector();
                 let sector = selected.and_then(|id| self.universe.sector(id));
                 let panel_resp = self.sector_panel.show(ui, sector, &self.universe);
@@ -46,7 +46,7 @@ impl eframe::App for App {
                 }
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             let selected = self.view_mode.selected_sector();
             let mvr = self.map_view.show(ui, &self.universe, selected);
 

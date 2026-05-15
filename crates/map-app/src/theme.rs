@@ -1,4 +1,4 @@
-use egui::{Color32, Rounding, Stroke, Style, Visuals};
+use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
 pub const BG_DARK: Color32      = Color32::from_rgb(10, 12, 18);
 pub const BG_PANEL: Color32     = Color32::from_rgb(20, 23, 33);
@@ -15,7 +15,7 @@ pub const HOSTILE_RED: Color32  = Color32::from_rgb(239, 68, 68);
 pub fn apply(ctx: &egui::Context) {
     let mut style = Style::default();
     style.visuals = dark_visuals();
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 fn dark_visuals() -> Visuals {
@@ -34,7 +34,7 @@ fn dark_visuals() -> Visuals {
     v.widgets.active.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
     v.selection.bg_fill = Color32::from_rgba_premultiplied(124, 58, 237, 40);
     v.selection.stroke = Stroke::new(1.0, ACCENT);
-    v.window_rounding = Rounding::same(4.0);
+    v.window_corner_radius = CornerRadius::same(4);
     v.window_stroke = Stroke::new(1.0, BORDER);
     v
 }

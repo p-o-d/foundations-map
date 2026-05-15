@@ -1,28 +1,149 @@
-use egui::{Pos2, Rect, Response, Sense, Vec2};
+use egui::{Pos2, Rect, Response, Sense, Stroke, Vec2};
 use glam::Vec2 as GVec2;
-use map_domain::ids::SectorId;
+use map_domain::ids::{FactionId, SectorId};
 use map_domain::universe::{Universe, GateType};
 use crate::theme;
 
+fn faction_fill(id: FactionId) -> egui::Color32 {
+    const PALETTE: &[(u8, u8, u8)] = &[
+        (59,  130, 246),  // blue
+        (34,  197, 94),   // green
+        (168, 85,  247),  // purple
+        (249, 115, 22),   // orange
+        (20,  184, 166),  // teal
+        (239, 68,  68),   // red
+        (234, 179, 8),    // yellow
+        (236, 72,  153),  // pink
+    ];
+    let (r, g, b) = PALETTE[id.0 as usize % PALETTE.len()];
+    egui::Color32::from_rgba_unmultiplied(r, g, b, 60)
+}
+
+/// Returns quadratic bezier control point in universe space, or None if straight.
+/// Works entirely in universe coordinates — zoom-invariant routing.
+fn route_ctrl_point(
+    from: GVec2,
+    to: GVec2,
+    obstacles: &[GVec2],
+    clearance: f32,  // universe units
+    from_id: u32,
+    to_id: u32,
+) -> Option<GVec2> {
+    let line = to - from;
+    let clearance_sq = clearance * clearance;
+
+    let mut left: f32 = 0.0;
+    let mut right: f32 = 0.0;
+    for &obs in obstacles {
+        let ab = line;
+        let ap = obs - from;
+        let len_sq = ab.dot(ab);
+        let dist_sq = if len_sq < 1e-6 {
+            ap.length_squared()
+        } else {
+            let t = (ap.dot(ab) / len_sq).clamp(0.0, 1.0);
+            (obs - (from + ab * t)).length_squared()
+        };
+        if dist_sq < clearance_sq {
+            // Cross product z: positive = left of from→to
+            if line.x * ap.y - line.y * ap.x >= 0.0 { left += 1.0; } else { right += 1.0; }
+        }
+    }
+
+    if left == 0.0 && right == 0.0 {
+        return None;
+    }
+
+    let line_len = line.length().max(1e-6);
+    let perp = GVec2::new(-line.y, line.x) / line_len;
+    // Deterministic tiebreak by sector IDs to prevent flickering
+    let sign: f32 = if left != right {
+        if left > right { -1.0 } else { 1.0 }
+    } else {
+        if from_id < to_id { 1.0 } else { -1.0 }
+    };
+    let mid = (from + to) * 0.5;
+    Some(mid + perp * (line_len * 0.25 * sign))
+}
+
+fn draw_connection(
+    painter: &egui::Painter,
+    fp: Pos2,
+    tp: Pos2,
+    ctrl_screen: Option<Pos2>,
+    color: egui::Color32,
+    width: f32,
+) {
+    match ctrl_screen {
+        None => {
+            painter.line_segment([fp, tp], Stroke::new(width, color));
+        }
+        Some(ctrl) => {
+            let pts: Vec<Pos2> = (0..=12).map(|i| {
+                let t = i as f32 / 12.0;
+                let u = 1.0 - t;
+                Pos2::new(
+                    u * u * fp.x + 2.0 * u * t * ctrl.x + t * t * tp.x,
+                    u * u * fp.y + 2.0 * u * t * ctrl.y + t * t * tp.y,
+                )
+            }).collect();
+            painter.add(egui::Shape::line(pts, Stroke::new(width, color)));
+        }
+    }
+}
+
 pub struct MapView {
-    pub pan: Vec2,   // offset in screen pixels
-    pub zoom: f32,   // pixels per universe unit
+    pub pan: Vec2,
+    pub zoom: f32,
+    min_zoom: f32,
+    fit_pending: bool,
+    last_rect_size: Vec2,
 }
 
 impl Default for MapView {
     fn default() -> Self {
-        Self { pan: Vec2::ZERO, zoom: 80.0 }
+        Self {
+            pan: Vec2::ZERO,
+            zoom: 4.0,
+            min_zoom: 1.0,
+            fit_pending: true,
+            last_rect_size: Vec2::ZERO,
+        }
     }
 }
 
 impl MapView {
-    /// Convert universe coordinates to screen position within the map rect.
     pub fn universe_to_screen(&self, rect: Rect, pos: GVec2) -> Pos2 {
         let center = rect.center();
         Pos2::new(
             center.x + self.pan.x + pos.x * self.zoom,
             center.y + self.pan.y + pos.y * self.zoom,
         )
+    }
+
+    fn fit_to(&mut self, universe: &Universe, rect: Rect) {
+        if universe.sectors.is_empty() {
+            return;
+        }
+        let mut min_x = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut min_z = f32::INFINITY;
+        let mut max_z = f32::NEG_INFINITY;
+        for s in &universe.sectors {
+            min_x = min_x.min(s.map_position.x);
+            max_x = max_x.max(s.map_position.x);
+            min_z = min_z.min(s.map_position.y);
+            max_z = max_z.max(s.map_position.y);
+        }
+        let span_x = (max_x - min_x).max(1.0);
+        let span_z = (max_z - min_z).max(1.0);
+        let margin = 0.15;
+        self.zoom = ((rect.width() / span_x).min(rect.height() / span_z) * (1.0 - margin))
+            .clamp(1.0, 400.0);
+        self.min_zoom = self.zoom;
+        let cx = (min_x + max_x) / 2.0;
+        let cz = (min_z + max_z) / 2.0;
+        self.pan = Vec2::new(-cx * self.zoom, -cz * self.zoom);
     }
 
     pub fn show(
@@ -36,83 +157,122 @@ impl MapView {
             Sense::click_and_drag(),
         );
 
+        // Re-fit on first frame or when window grows
+        let grew = rect.width() > self.last_rect_size.x + 2.0
+            || rect.height() > self.last_rect_size.y + 2.0;
+        if self.fit_pending || grew {
+            self.fit_to(universe, rect);
+            self.fit_pending = false;
+        }
+        self.last_rect_size = rect.size();
+
         let painter = ui.painter_at(rect);
 
         // Background
         painter.rect_filled(rect, 0.0, theme::BG_DARK);
 
-        // Connections
-        for conn in &universe.connections {
-            let from = universe.sector(conn.from).map(|s| s.map_position);
-            let to   = universe.sector(conn.to).map(|s| s.map_position);
-            if let (Some(f), Some(t)) = (from, to) {
-                let fp = self.universe_to_screen(rect, f);
-                let tp = self.universe_to_screen(rect, t);
-                let color = match conn.gate_type {
-                    GateType::Standard     => theme::ACCENT_DIM,
-                    GateType::Superhighway => theme::GATE_GREEN,
-                };
-                painter.line_segment([fp, tp], (1.5, color));
-            }
-        }
-
         // Sector nodes
         let mut clicked_sector: Option<SectorId> = None;
         let mut double_clicked_sector: Option<SectorId> = None;
+        let hex_r = (self.zoom * 3.0).clamp(12.0, 80.0);
 
-        for sector in &universe.sectors {
-            let screen_pos = self.universe_to_screen(rect, sector.map_position);
-            let half = Vec2::new(36.0, 20.0);
-            let node_rect = Rect::from_center_size(screen_pos, 2.0 * half);
+        let clicked_pos     = response.clicked().then(|| response.interact_pointer_pos()).flatten();
+        let dbl_clicked_pos = response.double_clicked().then(|| response.interact_pointer_pos()).flatten();
 
+        // Precompute sector screen positions for hit detection
+        let sector_screens: Vec<(SectorId, Pos2)> = universe.sectors.iter()
+            .map(|s| (s.id, self.universe_to_screen(rect, s.map_position)))
+            .collect();
+
+        // Connections — routing computed in universe space (zoom-invariant)
+        let obstacle_clearance_u = 3.0_f32; // universe units
+        for conn in &universe.connections {
+            let from_s = universe.sector(conn.from);
+            let to_s   = universe.sector(conn.to);
+            if let (Some(from_s), Some(to_s)) = (from_s, to_s) {
+                let obstacles_u: Vec<GVec2> = universe.sectors.iter()
+                    .filter(|s| s.id != conn.from && s.id != conn.to)
+                    .map(|s| s.map_position)
+                    .collect();
+                let ctrl_u = route_ctrl_point(
+                    from_s.map_position,
+                    to_s.map_position,
+                    &obstacles_u,
+                    obstacle_clearance_u,
+                    conn.from.0,
+                    conn.to.0,
+                );
+                let fp = self.universe_to_screen(rect, from_s.map_position);
+                let tp = self.universe_to_screen(rect, to_s.map_position);
+                let ctrl_screen = ctrl_u.map(|cu| self.universe_to_screen(rect, cu));
+                let (color, width) = match conn.gate_type {
+                    GateType::Standard     => (egui::Color32::from_rgb(80, 95, 150), 1.0),
+                    GateType::Superhighway => (theme::GATE_GREEN, 2.5),
+                };
+                draw_connection(&painter, fp, tp, ctrl_screen, color, width);
+            }
+        }
+
+        for (sector, &(_, screen_pos)) in universe.sectors.iter().zip(sector_screens.iter()) {
             let is_selected = selected == Some(sector.id);
+
             let border_color = if is_selected { theme::ACCENT } else { theme::BORDER };
-            let fill_color   = if is_selected {
-                egui::Color32::from_rgba_premultiplied(124, 58, 237, 30)
+            let fill_color = if is_selected {
+                egui::Color32::from_rgba_unmultiplied(124, 58, 237, 80)
+            } else if let Some(fid) = sector.faction {
+                faction_fill(fid)
             } else {
                 theme::BG_WIDGET
             };
             let border_width = if is_selected { 2.0 } else { 1.0 };
 
-            painter.rect(node_rect, 2.0, fill_color, (border_width, border_color));
+            // Flat-top hexagon
+            let pts: Vec<Pos2> = (0..6)
+                .map(|i| {
+                    let a = std::f32::consts::FRAC_PI_3 * i as f32;
+                    Pos2::new(screen_pos.x + hex_r * a.cos(), screen_pos.y + hex_r * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::convex_polygon(
+                pts,
+                fill_color,
+                Stroke::new(border_width, border_color),
+            ));
+
             painter.text(
-                screen_pos,
-                egui::Align2::CENTER_CENTER,
+                Pos2::new(screen_pos.x, screen_pos.y + hex_r + 2.0),
+                egui::Align2::CENTER_TOP,
                 &sector.name,
-                egui::FontId::proportional(10.0),
-                theme::TEXT_PRIMARY,
+                egui::FontId::proportional(9.0),
+                if is_selected { theme::ACCENT } else { theme::TEXT_PRIMARY },
             );
 
-            // Hit detection
-            if response.clicked() {
-                if let Some(ptr) = response.interact_pointer_pos() {
-                    if node_rect.contains(ptr) {
-                        clicked_sector = Some(sector.id);
-                    }
+            // Hit detection: circle around hex center
+            let hit_r = hex_r + 2.0;
+            if let Some(ptr) = clicked_pos {
+                if (ptr - screen_pos).length() < hit_r {
+                    clicked_sector = Some(sector.id);
                 }
             }
-            if response.double_clicked() {
-                if let Some(ptr) = response.interact_pointer_pos() {
-                    if node_rect.contains(ptr) {
-                        double_clicked_sector = Some(sector.id);
-                    }
+            if let Some(ptr) = dbl_clicked_pos {
+                if (ptr - screen_pos).length() < hit_r {
+                    double_clicked_sector = Some(sector.id);
                 }
             }
         }
 
-        // Pan: drag anywhere on the map
+        // Pan
         if response.dragged() {
             self.pan += response.drag_delta();
         }
 
-        // Zoom: scroll wheel, zooming toward pointer position
+        // Zoom toward pointer
         if let Some(hover_pos) = response.hover_pos() {
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll_delta != 0.0 {
                 let zoom_factor = (scroll_delta * 0.001).exp();
                 let old_zoom = self.zoom;
-                self.zoom = (self.zoom * zoom_factor).clamp(20.0, 400.0);
-                // Adjust pan so zoom targets the pointer position
+                self.zoom = (self.zoom * zoom_factor).clamp(self.min_zoom, 400.0);
                 let center = rect.center();
                 let mouse_offset = hover_pos - center;
                 let scale_change = self.zoom / old_zoom;
@@ -151,15 +311,15 @@ mod tests {
 
     #[test]
     fn universe_to_screen_applies_zoom() {
-        let mv = MapView { pan: Vec2::ZERO, zoom: 100.0 };
+        let mv = MapView { pan: Vec2::ZERO, zoom: 100.0, min_zoom: 1.0, fit_pending: false, last_rect_size: Vec2::ZERO };
         let rect = Rect::from_center_size(Pos2::new(400.0, 300.0), Vec2::new(800.0, 600.0));
         let screen = mv.universe_to_screen(rect, GVec2::new(1.0, 0.0));
-        assert_eq!(screen.x, 500.0); // 400 + 1.0 * 100
+        assert_eq!(screen.x, 500.0);
     }
 
     #[test]
     fn universe_to_screen_applies_pan() {
-        let mv = MapView { pan: Vec2::new(50.0, -30.0), zoom: 80.0 };
+        let mv = MapView { pan: Vec2::new(50.0, -30.0), zoom: 80.0, min_zoom: 1.0, fit_pending: false, last_rect_size: Vec2::ZERO };
         let rect = Rect::from_center_size(Pos2::new(400.0, 300.0), Vec2::new(800.0, 600.0));
         let screen = mv.universe_to_screen(rect, GVec2::ZERO);
         assert_eq!(screen, Pos2::new(450.0, 270.0));

@@ -61,15 +61,6 @@ impl SectorPanel {
             }
         }
 
-        ui.add_space(8.0);
-        ui.separator();
-        ui.add_space(8.0);
-
-        // Static objects count
-        ui.colored_label(theme::TEXT_MUTED, "OBJECTS");
-        ui.add_space(4.0);
-        ui.colored_label(theme::TEXT_PRIMARY, format!("{} static objects", sector.static_objects.len()));
-
         ui.add_space(12.0);
 
         let open_clicked = ui.button("▣  Open 3D View").clicked();

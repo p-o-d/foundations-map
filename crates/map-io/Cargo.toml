@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 map-domain = { path = "../map-domain" }
-quick-xml = "0.36"
-glam = "0.27"
+quick-xml = "0.40.0"
+glam = "0.32.1"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
+winreg = "0.56.0"
