@@ -105,6 +105,11 @@ impl SectorView3D {
         );
         ui.painter().add(cb);
 
+        // Gate direction arrows drawn on top of 3D scene
+        if let Some(sec) = sector {
+            draw_gate_arrows(ui.painter(), view_rect, camera, sec);
+        }
+
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
         draw_axis_arrows(ui.painter(), view_rect, camera);
 
@@ -135,8 +140,15 @@ fn build_draw_calls(sector: &Sector, selected: Option<ObjectId>) -> Vec<DrawCall
         } else {
             kind_color(&obj.kind)
         };
-        let model = Mat4::from_translation(obj.position)
-            * Mat4::from_scale(Vec3::splat(scale));
+        let rotation = obj.rotation.map(|(pitch, yaw, roll)| {
+            Mat4::from_euler(
+                glam::EulerRot::YXZ,
+                yaw.to_radians(),
+                pitch.to_radians(),
+                roll.to_radians(),
+            )
+        }).unwrap_or(Mat4::IDENTITY);
+        let model = Mat4::from_translation(obj.position) * rotation * Mat4::from_scale(Vec3::splat(scale));
         DrawCall { kind, mvp: model, color }
     }).collect()
 }
@@ -229,4 +241,53 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
             *color,
         );
     }
+}
+
+/// Draw bidirectional arrows through each gate, projected onto screen as a 2D painter overlay.
+/// Arrow direction = gate normal (Y axis rotated by gate orientation).
+fn draw_gate_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera, sector: &Sector) {
+    let aspect = view_rect.width() / view_rect.height().max(1.0);
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
+
+    let project = |world: Vec3| -> Option<egui::Pos2> {
+        let clip = vp * world.extend(1.0);
+        if clip.w <= 0.0 { return None; }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        Some(egui::Pos2::new(
+            (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
+        ))
+    };
+
+    let color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 200);
+
+    for obj in &sector.static_objects {
+        if obj.kind != StaticObjectKind::Gate { continue; }
+
+        let (pitch, yaw, roll) = obj.rotation.unwrap_or((0.0, 0.0, 0.0));
+        let rot = Mat4::from_euler(
+            glam::EulerRot::YXZ,
+            yaw.to_radians(), pitch.to_radians(), roll.to_radians(),
+        );
+        let normal = rot.transform_vector3(Vec3::Y);
+        let arm = 6.0_f32;
+
+        let Some(s_a) = project(obj.position - normal * arm) else { continue };
+        let Some(s_b) = project(obj.position + normal * arm) else { continue };
+
+        painter.line_segment([s_a, s_b], egui::Stroke::new(2.0, color));
+        draw_arrowhead(painter, s_b, s_a, color);
+        draw_arrowhead(painter, s_a, s_b, color);
+    }
+}
+
+fn draw_arrowhead(painter: &egui::Painter, tip: egui::Pos2, tail: egui::Pos2, color: egui::Color32) {
+    let dir  = (tip - tail).normalized();
+    let perp = egui::Vec2::new(-dir.y, dir.x);
+    painter.add(egui::Shape::convex_polygon(
+        vec![tip, tip - dir * 8.0 + perp * 4.0, tip - dir * 8.0 - perp * 4.0],
+        color,
+        egui::Stroke::NONE,
+    ));
 }

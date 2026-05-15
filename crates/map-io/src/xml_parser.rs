@@ -177,6 +177,32 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] Gate objects loaded: {}", gate_obj_counter);
 
+    // Parse non-gate static objects (stations, resource zones, anomalies) from zones.xml.
+    let non_gate_objects: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String)>> =
+        parse_non_gate_objects_xml(&zones_str)
+            .into_iter()
+            .map(|(k, v)| (k.to_lowercase(), v))
+            .collect();
+    let mut non_gate_counter = 0u32;
+    for sector in &mut sectors {
+        if let Some(objects) = id_to_macro.get(&sector.id)
+            .and_then(|m| non_gate_objects.get(&m.to_lowercase()))
+        {
+            for (x, y, z, kind, name) in objects {
+                non_gate_counter += 1;
+                sector.static_objects.push(StaticObject {
+                    id:       ObjectId(20_000 + non_gate_counter),
+                    kind:     kind.clone(),
+                    position: Vec3::new(*x, *y, *z),
+                    faction:  None,
+                    name:     name.clone(),
+                    rotation: None,
+                });
+            }
+        }
+    }
+    eprintln!("[map] Non-gate objects loaded: {}", non_gate_counter);
+
     Ok(Universe { sectors, connections })
 }
 
@@ -659,6 +685,95 @@ pub fn zone_name_to_sector_macro(name: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Classify a static object by its macro reference name.
+fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
+    let lower = macro_ref.to_lowercase();
+    if lower.contains("station") || lower.contains("dock") || lower.contains("platform") || lower.contains("_hq") {
+        StaticObjectKind::Station
+    } else if lower.contains("resource") || lower.contains("asteroid") || lower.contains("gas") || lower.contains("field") || lower.contains("debris") {
+        StaticObjectKind::ResourceZone
+    } else {
+        StaticObjectKind::Anomaly
+    }
+}
+
+/// zones.xml: sector_macro_name → non-gate object positions (x, y, z in km, kind, display name).
+/// Picks up `ref="object"` connections in zone macros and classifies by macro ref name.
+fn parse_non_gate_objects_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String)>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String)>> = HashMap::new();
+    let mut current_sector: Option<String> = None;
+    let mut in_object_conn = false;
+    let mut in_offset = false;
+    let mut obj_pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
+    let mut obj_macro: Option<String> = None;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                b"macro" => {
+                    let class = attr_value(e, b"class").unwrap_or_default();
+                    if class == "zone" {
+                        let name = attr_value(e, b"name").unwrap_or_default();
+                        current_sector = zone_name_to_sector_macro(&name);
+                    }
+                }
+                b"connection" if current_sector.is_some() => {
+                    let conn_ref  = attr_value(e, b"ref").unwrap_or_default();
+                    let conn_name = attr_value(e, b"name").unwrap_or_default();
+                    if conn_ref == "object" && parse_gate_cluster_nums(&conn_name).is_none() {
+                        in_object_conn = true;
+                        obj_pos = (0.0, 0.0, 0.0);
+                        obj_macro = None;
+                    }
+                }
+                b"offset" if in_object_conn => in_offset = true,
+                _ => {}
+            },
+            Ok(Event::Empty(ref e)) => match e.name().as_ref() {
+                b"position" if in_offset => {
+                    obj_pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    obj_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    obj_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                }
+                b"macro" if in_object_conn => {
+                    obj_macro = attr_value(e, b"ref");
+                }
+                _ => {}
+            },
+            Ok(Event::End(ref e)) => match e.name().as_ref() {
+                b"offset" => in_offset = false,
+                b"connection" if in_object_conn => {
+                    if let (Some(sector), Some(macro_ref)) = (&current_sector, obj_macro.take()) {
+                        let kind = classify_static_object(&macro_ref);
+                        let name = macro_to_display_name(&macro_ref);
+                        result.entry(sector.clone()).or_default().push((
+                            obj_pos.0 / 1000.0,
+                            obj_pos.1 / 1000.0,
+                            obj_pos.2 / 1000.0,
+                            kind,
+                            name,
+                        ));
+                    }
+                    in_object_conn = false;
+                }
+                b"macro" => {
+                    current_sector = None;
+                    in_object_conn = false;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
 }
 
 /// `connection_ClusterGate001To004` → `(1, 4)`
