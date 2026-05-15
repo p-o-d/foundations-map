@@ -1,3 +1,4 @@
+mod renderer;
 mod app;
 mod theme;
 pub mod ui;
