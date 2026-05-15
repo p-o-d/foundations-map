@@ -637,10 +637,14 @@ fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, St
                             gate_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
                             gate_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
                         }
-                        b"rotation" => {
-                            gate_rot.0 = attr_value(e, b"pitch").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            gate_rot.1 = attr_value(e, b"yaw").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            gate_rot.2 = attr_value(e, b"roll").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                        b"quaternion" => {
+                            let qx: f32 = attr_value(e, b"qx").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            let qy: f32 = attr_value(e, b"qy").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            let qz: f32 = attr_value(e, b"qz").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            let qw: f32 = attr_value(e, b"qw").and_then(|s| s.parse().ok()).unwrap_or(1.0);
+                            let q = glam::Quat::from_xyzw(qx, qy, qz, qw).normalize();
+                            let (yaw, pitch, roll) = q.to_euler(glam::EulerRot::YXZ);
+                            gate_rot = (pitch.to_degrees(), yaw.to_degrees(), roll.to_degrees());
                         }
                         _ => {}
                     }
@@ -727,7 +731,8 @@ fn parse_non_gate_objects_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, 
                 b"connection" if current_sector.is_some() => {
                     let conn_ref  = attr_value(e, b"ref").unwrap_or_default();
                     let conn_name = attr_value(e, b"name").unwrap_or_default();
-                    if conn_ref == "object" && parse_gate_cluster_nums(&conn_name).is_none() {
+                    let is_gate = conn_ref == "gates" || parse_gate_cluster_nums(&conn_name).is_some();
+                    if !is_gate && !conn_ref.ends_with("_gate") && !conn_ref.is_empty() {
                         in_object_conn = true;
                         obj_pos = (0.0, 0.0, 0.0);
                         obj_macro = None;
