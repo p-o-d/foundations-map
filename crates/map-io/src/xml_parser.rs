@@ -56,30 +56,43 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             .ok_or_else(|| ParseError::MissingAttribute(format!("{path} not found in cat archives")))
     };
 
-    let galaxy_data = load("maps/xu_ep2_universe/galaxy.xml")?;
-    let clusters_data = load("maps/xu_ep2_universe/clusters.xml")?;
-
     let translations_data = load("t/0001-l044.xml")?;
-
-    let galaxy_str = String::from_utf8_lossy(&galaxy_data);
-    let clusters_str = String::from_utf8_lossy(&clusters_data);
     let translations_str = String::from_utf8_lossy(&translations_data);
 
-    // cluster_macro_name → absolute (x, z) in game units (metres)
-    let cluster_positions = parse_cluster_positions_xml(&galaxy_str)?;
-    // sector_macro_name → (cluster_macro_name, relative_x, relative_z)
-    let sector_placements = parse_sector_placements_xml(&clusters_str)?;
-    // Merge name refs from main game + all DLC mapdefaults.xml files
+    // Scan all universe map XML files (main + every DLC) once.
+    let universe_files = crate::cat_reader::list_files_matching(game_dir, "maps/xu_ep2_universe/", ".xml");
+
+    let mut cluster_positions: HashMap<String, (f32, f32)> = HashMap::new();
+    let mut sector_placements: HashMap<String, (String, f32, f32)> = HashMap::new();
+    let mut all_clusters_strs: Vec<String> = Vec::new();
+    let mut all_zones_strs: Vec<String> = Vec::new();
+    let mut all_sectors_strs: Vec<String> = Vec::new();
+
+    for (path, data) in &universe_files {
+        let s = String::from_utf8_lossy(data).into_owned();
+        if path.ends_with("galaxy.xml") {
+            if let Ok(positions) = parse_cluster_positions_xml(&s) {
+                cluster_positions.extend(positions);
+            }
+        } else if path.ends_with("clusters.xml") {
+            if let Ok(placements) = parse_sector_placements_xml(&s) {
+                sector_placements.extend(placements);
+            }
+            all_clusters_strs.push(s);
+        } else if path.ends_with("zones.xml") {
+            all_zones_strs.push(s);
+        } else if path.ends_with("sectors.xml") {
+            all_sectors_strs.push(s);
+        }
+    }
+    eprintln!("[map] Universe XML files: {} (galaxy/clusters/zones/sectors merged)", universe_files.len());
+
     let mut name_refs = HashMap::new();
     for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/mapdefaults.xml") {
         let s = String::from_utf8_lossy(&data);
         name_refs.extend(parse_sector_name_refs_xml(&s)?);
     }
-    // (page_id, text_id) → display name string
     let translations = parse_translations_xml(&translations_str)?;
-
-    let zones_data = load("maps/xu_ep2_universe/zones.xml")?;
-    let zones_str = String::from_utf8_lossy(&zones_data);
 
     let mut sectors = Vec::new();
     let mut macro_to_id: HashMap<String, SectorId> = HashMap::new();
@@ -117,7 +130,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         });
     }
 
-    let gate_pairs = parse_gate_connections_xml(&zones_str, &sector_placements);
+    let mut gate_pairs: Vec<(String, String)> = Vec::new();
+    for zs in &all_zones_strs {
+        gate_pairs.extend(parse_gate_connections_xml(zs, &sector_placements));
+    }
     let mut connections: Vec<Connection> = gate_pairs
         .into_iter()
         .filter_map(|(a, b)| {
@@ -132,11 +148,12 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     // Parse gate positions and populate sectors.
     // Keys from parse_gate_positions_xml come from zones.xml zone names; id_to_macro keys come
     // from clusters.xml. DLC sectors may differ in casing — normalise both to lowercase.
-    let gate_positions: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> =
-        parse_gate_positions_xml(&zones_str)
-            .into_iter()
-            .map(|(k, v)| (k.to_lowercase(), v))
-            .collect();
+    let mut gate_positions: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> = HashMap::new();
+    for zs in &all_zones_strs {
+        for (k, v) in parse_gate_positions_xml(zs) {
+            gate_positions.entry(k.to_lowercase()).or_default().extend(v);
+        }
+    }
     // cluster_num → first sector display name for that cluster, used to label gates.
     let mut cluster_num_to_name: HashMap<u32, String> = HashMap::new();
     for sector in &sectors {
@@ -185,11 +202,12 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     eprintln!("[map] Gate objects loaded: {}", gate_obj_counter);
 
     // Parse non-gate static objects (stations, resource zones, anomalies) from zones.xml.
-    let non_gate_objects: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> =
-        parse_non_gate_objects_xml(&zones_str)
-            .into_iter()
-            .map(|(k, v)| (k.to_lowercase(), v))
-            .collect();
+    let mut non_gate_objects: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> = HashMap::new();
+    for zs in &all_zones_strs {
+        for (k, v) in parse_non_gate_objects_xml(zs) {
+            non_gate_objects.entry(k.to_lowercase()).or_default().extend(v);
+        }
+    }
     let mut non_gate_counter = 0u32;
     for sector in &mut sectors {
         if let Some(objects) = id_to_macro.get(&sector.id)
@@ -263,7 +281,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     eprintln!("[map] God stations loaded: {}", station_counter);
 
     // Parse superhighway connections from clusters.xml (entry → exit, one-way).
-    let sechighways = parse_sechighway_connections_xml(&clusters_str);
+    let mut sechighways: Vec<(String, String, String, String)> = Vec::new();
+    for cs in &all_clusters_strs {
+        sechighways.extend(parse_sechighway_connections_xml(cs));
+    }
     // zone macro (lowercase) → (role, destination sector name)
     let mut sh_zone_info: HashMap<String, (ShRole, String)> = HashMap::new();
     for (from_sec, to_sec, entry_zone, exit_zone) in &sechighways {
@@ -291,9 +312,8 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
 
     // Parse superhighway connection zones from sectors.xml (entry/exit points within sectors).
     let mut sh_counter = 0u32;
-    if let Some(sectors_data) = crate::cat_reader::read_game_file(game_dir, "maps/xu_ep2_universe/sectors.xml") {
-        let sectors_str = String::from_utf8_lossy(&sectors_data);
-        for (sec_lower, x, y, z, fallback_name, zone_lower) in parse_superhighway_zones_xml(&sectors_str) {
+    for sectors_str in &all_sectors_strs {
+        for (sec_lower, x, y, z, fallback_name, zone_lower) in parse_superhighway_zones_xml(sectors_str) {
             if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
                 if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
                     sh_counter += 1;
