@@ -48,6 +48,7 @@ pub fn parse_save(
     path: &Path,
     sector_macro_to_id: Option<&HashMap<String, SectorId>>,
 ) -> Result<(SnapshotMeta, World, FactionOverrides), ParseError> {
+    let t0 = std::time::Instant::now();
     let file = File::open(path)?;
     let mtime = file
         .metadata()
@@ -105,13 +106,20 @@ pub fn parse_save(
         }
         buf.clear();
     }
+    let info_elapsed = t0.elapsed().as_millis();
+    eprintln!("[map] save info parsed in {}ms", info_elapsed);
 
     // --- Universe tree walk ---------------------------------------------------
+    let t_universe = std::time::Instant::now();
     let mut comp_depth: u32 = 0;
     let mut current_sector_macro: Option<String> = None;
     let mut sector_open_depth: Option<u32> = None;
     let mut pending: Option<PendingEntity> = None;
     let mut in_offset = false;
+    // True while we're inside an entity whose position has already been captured.
+    // In that state we only need to track component depth to detect the entity's
+    // close — we can skip all attribute/class inspection.
+    let mut entity_captured: bool = false;
     let mut faction_name_to_id: HashMap<String, FactionId> = HashMap::new();
     let mut next_faction_id: u32 = 1;
 
@@ -119,34 +127,37 @@ pub fn parse_save(
         match reader.read_event_into(&mut buf)? {
             Event::Start(ref e) if e.name().as_ref() == b"component" => {
                 comp_depth += 1;
-                let class = attr_value(e, b"class").unwrap_or_default();
-                match class.as_str() {
-                    "sector" => {
-                        if let Some(macro_name) = attr_value(e, b"macro") {
-                            let key = macro_name.to_lowercase();
-                            if let Some(owner) = attr_value(e, b"owner") {
-                                overrides.insert(key.clone(), owner);
-                            }
-                            current_sector_macro = Some(key);
-                            sector_open_depth = Some(comp_depth);
+                // Fast path: already captured this entity's position; just track depth.
+                if entity_captured {
+                    buf.clear();
+                    continue;
+                }
+                let class_bytes = attr_bytes(e, b"class");
+                let class_ref = class_bytes.as_deref();
+                if class_ref == Some(b"sector".as_ref()) {
+                    if let Some(macro_name) = attr_value(e, b"macro") {
+                        let key = macro_name.to_lowercase();
+                        if let Some(owner) = attr_value(e, b"owner") {
+                            overrides.insert(key.clone(), owner);
                         }
+                        current_sector_macro = Some(key);
+                        sector_open_depth = Some(comp_depth);
                     }
-                    "station" | "ship_xs" | "ship_s" | "ship_m" | "ship_l" | "ship_xl"
-                        if pending.is_none() =>
-                    {
-                        if let Some(p) = build_pending_entity(
-                            e,
-                            &class,
-                            comp_depth,
-                            current_sector_macro.as_deref(),
-                            sector_macro_to_id,
-                            &mut faction_name_to_id,
-                            &mut next_faction_id,
-                        ) {
-                            pending = Some(p);
-                        }
+                } else if pending.is_none() && is_entity_class(class_ref) {
+                    // SAFETY: is_entity_class returned true, so class_ref is Some.
+                    let cb = class_ref.unwrap();
+                    let class_str = std::str::from_utf8(cb).unwrap_or("");
+                    if let Some(p) = build_pending_entity(
+                        e,
+                        class_str,
+                        comp_depth,
+                        current_sector_macro.as_deref(),
+                        sector_macro_to_id,
+                        &mut faction_name_to_id,
+                        &mut next_faction_id,
+                    ) {
+                        pending = Some(p);
                     }
-                    _ => {}
                 }
             }
             Event::End(ref e) if e.name().as_ref() == b"component" => {
@@ -156,6 +167,7 @@ pub fn parse_save(
                         let p = pending.take().unwrap();
                         let pos = p.position.unwrap_or(Vec3::ZERO);
                         world.insert_entity(p.id, p.name, p.kind, p.faction, pos, p.sector);
+                        entity_captured = false;
                     }
                 }
                 // Clear sector tracking if its component is closing.
@@ -168,26 +180,23 @@ pub fn parse_save(
                 comp_depth = comp_depth.saturating_sub(1);
             }
             Event::Start(ref e) if e.name().as_ref() == b"offset" => {
-                in_offset = true;
+                if !entity_captured {
+                    in_offset = true;
+                }
             }
             Event::End(ref e) if e.name().as_ref() == b"offset" => {
                 in_offset = false;
             }
             Event::Empty(ref e) if e.name().as_ref() == b"position" => {
-                if in_offset {
+                if in_offset && !entity_captured {
                     if let Some(p) = pending.as_mut() {
                         if p.position.is_none() {
-                            let x = attr_value(e, b"x")
-                                .and_then(|s| s.parse::<f32>().ok())
-                                .unwrap_or(0.0);
-                            let y = attr_value(e, b"y")
-                                .and_then(|s| s.parse::<f32>().ok())
-                                .unwrap_or(0.0);
-                            let z = attr_value(e, b"z")
-                                .and_then(|s| s.parse::<f32>().ok())
-                                .unwrap_or(0.0);
+                            let x = attr_f32(e, b"x").unwrap_or(0.0);
+                            let y = attr_f32(e, b"y").unwrap_or(0.0);
+                            let z = attr_f32(e, b"z").unwrap_or(0.0);
                             // X4 stores positions in metres; convert to km to match static-object scale.
                             p.position = Some(Vec3::new(x / 1000.0, y / 1000.0, z / 1000.0));
+                            entity_captured = true;
                         }
                     }
                 }
@@ -198,7 +207,25 @@ pub fn parse_save(
         buf.clear();
     }
 
+    let universe_elapsed = t_universe.elapsed().as_millis();
+    let total_elapsed = t0.elapsed().as_millis();
+    eprintln!(
+        "[map] save universe parsed in {}ms (total {}ms)",
+        universe_elapsed, total_elapsed
+    );
+
     Ok((meta, world, overrides))
+}
+
+/// Quick class-name check against the supported entity classes. Byte-slice
+/// comparison, no allocation.
+#[inline]
+fn is_entity_class(class: Option<&[u8]>) -> bool {
+    match class {
+        Some(b"station") | Some(b"ship_xs") | Some(b"ship_s") | Some(b"ship_m")
+        | Some(b"ship_l") | Some(b"ship_xl") => true,
+        _ => false,
+    }
 }
 
 /// Construct a pending entity from a `<component>` Start event. Returns `None`
@@ -264,6 +291,24 @@ fn attr_value(e: &BytesStart, name: &[u8]) -> Option<String> {
         .filter_map(Result::ok)
         .find(|a| a.key.as_ref() == name)
         .and_then(|a| String::from_utf8(a.value.into_owned()).ok())
+}
+
+/// Zero-allocation attribute fetch. Returns the raw bytes (Cow because
+/// quick_xml's `Attribute::value` is `Cow<[u8]>` — borrowed when the value
+/// has no XML entities, owned when it does). Use this for cheap equality
+/// checks like `attr_bytes(e, b"class").as_deref() == Some(b"sector")`.
+fn attr_bytes<'a>(e: &'a BytesStart, name: &[u8]) -> Option<std::borrow::Cow<'a, [u8]>> {
+    e.attributes()
+        .filter_map(Result::ok)
+        .find(|a| a.key.as_ref() == name)
+        .map(|a| a.value)
+}
+
+/// Parse an attribute as `f32` without intermediate `String` allocation.
+fn attr_f32(e: &BytesStart, name: &[u8]) -> Option<f32> {
+    let bytes = attr_bytes(e, name)?;
+    let s = std::str::from_utf8(&bytes).ok()?;
+    s.parse::<f32>().ok()
 }
 
 #[cfg(test)]

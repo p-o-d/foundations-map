@@ -5,3 +5,10 @@ members = [
     "crates/map-app",
 ]
 resolver = "2"
+
+# Dependencies stay optimized even in dev builds: gzip + xml parsing on the
+# real 96 MB save drops from ~60s (unoptimized) to ~3s. Workspace crates
+# themselves keep debug-info + zero-opt for fast iteration.
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
