@@ -118,7 +118,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
 
     let gate_pairs = parse_gate_connections_xml(&zones_str, &sector_placements);
-    let connections: Vec<Connection> = gate_pairs
+    let mut connections: Vec<Connection> = gate_pairs
         .into_iter()
         .filter_map(|(a, b)| {
             Some(Connection {
@@ -206,7 +206,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     // Parse fixed objects from god.xml (main + all DLC extensions).
     // Uses read_all_game_files since extensions supply additional god.xml entries.
     let mut god_counter = 0u32;
-    let mut sector_macro_to_id: HashMap<String, SectorId> = macro_to_id
+    let sector_macro_to_id: HashMap<String, SectorId> = macro_to_id
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
@@ -230,14 +230,46 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] God objects loaded: {}", god_counter);
 
+    // Parse superhighway connections from clusters.xml (entry → exit, one-way).
+    let sechighways = parse_sechighway_connections_xml(&clusters_str);
+    // zone macro (lowercase) → (role, destination sector name)
+    let mut sh_zone_info: HashMap<String, (ShRole, String)> = HashMap::new();
+    for (from_sec, to_sec, entry_zone, exit_zone) in &sechighways {
+        // Look up sector display names
+        let from_name = sector_macro_to_id.get(from_sec)
+            .and_then(|id| sectors.iter().find(|s| s.id == *id))
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| from_sec.clone());
+        let to_name = sector_macro_to_id.get(to_sec)
+            .and_then(|id| sectors.iter().find(|s| s.id == *id))
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| to_sec.clone());
+        sh_zone_info.insert(entry_zone.clone(), (ShRole::Entry, to_name.clone()));
+        sh_zone_info.insert(exit_zone.clone(),  (ShRole::Exit,  from_name.clone()));
+        // Add 2D map connection (one-way; existing model is undirected so use from→to)
+        if let (Some(&fid), Some(&tid)) = (sector_macro_to_id.get(from_sec), sector_macro_to_id.get(to_sec)) {
+            connections.push(Connection {
+                from: fid,
+                to:   tid,
+                gate_type: GateType::Superhighway,
+            });
+        }
+    }
+    eprintln!("[map] Superhighway connections (sector pairs): {}", sechighways.len());
+
     // Parse superhighway connection zones from sectors.xml (entry/exit points within sectors).
     let mut sh_counter = 0u32;
     if let Some(sectors_data) = crate::cat_reader::read_game_file(game_dir, "maps/xu_ep2_universe/sectors.xml") {
         let sectors_str = String::from_utf8_lossy(&sectors_data);
-        for (sec_lower, x, y, z, name) in parse_superhighway_zones_xml(&sectors_str) {
+        for (sec_lower, x, y, z, fallback_name, zone_lower) in parse_superhighway_zones_xml(&sectors_str) {
             if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
                 if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
                     sh_counter += 1;
+                    let name = match sh_zone_info.get(&zone_lower) {
+                        Some((ShRole::Entry, dest)) => format!("Superhighway Entry → {}", dest),
+                        Some((ShRole::Exit,  src))  => format!("Superhighway Exit ← {}", src),
+                        None => fallback_name,
+                    };
                     sector.static_objects.push(StaticObject {
                         id:       ObjectId(40_000 + sh_counter),
                         kind:     StaticObjectKind::Gate,
@@ -747,10 +779,104 @@ fn zone_macro_to_sector_lower(mac: &str) -> Option<String> {
     lower.find("cluster_").map(|pos| lower[pos..].to_string())
 }
 
+/// Extract sector macro (lowercase) from a SHCon zone macro name.
+/// `"tzoneCluster_01_Sector002SHCon5_GateZone_macro"` → `"cluster_01_sector002_macro"`
+fn shcon_zone_to_sector_macro_lower(zm: &str) -> Option<String> {
+    let lower = zm.to_lowercase();
+    let start = lower.find("cluster_")?;
+    let rest = &lower[start..];
+    let end = rest.find("shcon")?;
+    Some(format!("{}_macro", &rest[..end]))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShRole {
+    Entry,
+    Exit,
+}
+
+/// clusters.xml: parse sechighway connections.
+/// Returns list of (from_sector_macro_lower, to_sector_macro_lower, entry_zone_macro_lower, exit_zone_macro_lower).
+fn parse_sechighway_connections_xml(xml: &str) -> Vec<(String, String, String, String)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result = Vec::new();
+    let mut in_sh = false;
+    let mut current_role: Option<ShRole> = None;
+    let mut entry_sec: Option<String> = None;
+    let mut exit_sec:  Option<String> = None;
+    let mut entry_zone: Option<String> = None;
+    let mut exit_zone:  Option<String> = None;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => {
+                if e.name().as_ref() == b"connection" {
+                    let r = attr_value(e, b"ref").unwrap_or_default();
+                    if r == "sechighways" {
+                        in_sh = true;
+                        entry_sec = None;
+                        exit_sec  = None;
+                        entry_zone = None;
+                        exit_zone  = None;
+                    } else if in_sh {
+                        current_role = match r.as_str() {
+                            "entrypoint" => Some(ShRole::Entry),
+                            "exitpoint"  => Some(ShRole::Exit),
+                            _ => None,
+                        };
+                    }
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                if in_sh && current_role.is_some() && e.name().as_ref() == b"macro" {
+                    if let Some(conn_attr) = attr_value(e, b"connection") {
+                        let zone_lower = conn_attr.to_lowercase();
+                        if let Some(sec) = shcon_zone_to_sector_macro_lower(&zone_lower) {
+                            match current_role {
+                                Some(ShRole::Entry) => {
+                                    entry_sec = Some(sec);
+                                    entry_zone = Some(zone_lower);
+                                }
+                                Some(ShRole::Exit) => {
+                                    exit_sec = Some(sec);
+                                    exit_zone = Some(zone_lower);
+                                }
+                                None => {}
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                if e.name().as_ref() == b"connection" {
+                    if current_role.is_some() {
+                        current_role = None;
+                    } else if in_sh {
+                        if let (Some(from), Some(to), Some(ez), Some(xz)) =
+                            (entry_sec.take(), exit_sec.take(), entry_zone.take(), exit_zone.take())
+                        {
+                            result.push((from, to, ez, xz));
+                        }
+                        in_sh = false;
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
+}
+
+
 /// sectors.xml: SHCon zones — superhighway entry/exit points within a sector.
-/// Returns (sector_macro_lower, x_km, y_km, z_km, display_name).
+/// Returns (sector_macro_lower, x_km, y_km, z_km, display_name, zone_macro_lower).
 /// Zone macro pattern: `tzone<SectorMacroFragment>SHCon{N}_GateZone_macro`.
-fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String)> {
+fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String, String)> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -796,13 +922,13 @@ fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String
                 b"connection" if in_conn => {
                     if let (Some(sec), Some(zm)) = (&current_sector, zone_macro.take()) {
                         // Only SHCon zones (superhighway connection points).
-                        if zm.to_lowercase().contains("shcon") {
-                            // Extract SHConN for display.
-                            let lower = zm.to_lowercase();
-                            let shcon_label = lower
+                        let zm_lower = zm.to_lowercase();
+                        if zm_lower.contains("shcon") {
+                            // Extract SHConN for display fallback.
+                            let shcon_label = zm_lower
                                 .find("shcon")
                                 .map(|i| {
-                                    let rest = &lower[i..];
+                                    let rest = &zm_lower[i..];
                                     let end = rest
                                         .find(|c: char| !c.is_ascii_alphanumeric())
                                         .unwrap_or(rest.len());
@@ -810,7 +936,7 @@ fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String
                                 })
                                 .unwrap_or_else(|| "shcon".into());
                             let name = format!("Superhighway {}", shcon_label.to_uppercase());
-                            result.push((sec.clone(), pos.0 / 1000.0, pos.1 / 1000.0, pos.2 / 1000.0, name));
+                            result.push((sec.clone(), pos.0 / 1000.0, pos.1 / 1000.0, pos.2 / 1000.0, name, zm_lower));
                         }
                     }
                     in_conn = false;

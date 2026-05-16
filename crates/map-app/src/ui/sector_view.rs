@@ -280,6 +280,20 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
         if dir.length() < 0.001 { continue; }
         let dir = dir.normalize();
 
+        // Identify superhighway vs regular gate by name prefix.
+        let name_lower = obj.name.to_lowercase();
+        let is_superhighway = name_lower.starts_with("superhighway");
+        let is_entry = is_superhighway && name_lower.contains("entry");
+        // Pick colors per kind.
+        let (this_ring_color, this_arrow_color) = if is_superhighway {
+            (
+                egui::Color32::from_rgba_premultiplied(80, 230, 120, 230),
+                egui::Color32::from_rgba_premultiplied(80, 230, 120, 230),
+            )
+        } else {
+            (ring_color, arrow_color)
+        };
+
         // Distance from camera → world units per pixel for constant on-screen size.
         let dist = (obj.position - cam_eye).length();
         let world_per_px = dist * fov_factor / view_rect.height();
@@ -303,21 +317,33 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
         }
         if !all_ok { continue; }
         for i in 0..SEGMENTS {
-            painter.line_segment([pts[i], pts[(i + 1) % SEGMENTS]], egui::Stroke::new(1.5, ring_color));
+            painter.line_segment([pts[i], pts[(i + 1) % SEGMENTS]], egui::Stroke::new(1.5, this_ring_color));
         }
 
-        // Two arrows on Y=0 plane, opposite directions: one toward origin, one away.
-        // Each is single-sided with arrowhead at its outer tip.
         let center = Vec3::new(obj.position.x, 0.0, obj.position.z);
-        let tip_inward  = center + dir * arrow_len;
-        let tip_outward = center - dir * arrow_len;
-        let Some(s_center)  = project(center)      else { continue };
-        let Some(s_inward)  = project(tip_inward)  else { continue };
-        let Some(s_outward) = project(tip_outward) else { continue };
-        painter.line_segment([s_center, s_inward],  egui::Stroke::new(1.5, arrow_color));
-        painter.line_segment([s_center, s_outward], egui::Stroke::new(1.5, arrow_color));
-        draw_arrowhead(painter, s_inward,  s_center, arrow_color);
-        draw_arrowhead(painter, s_outward, s_center, arrow_color);
+        let Some(s_center) = project(center) else { continue };
+        if is_superhighway {
+            // Single arrow. Entry: outbound (center → outer). Exit: inbound (outer → center).
+            // Outer point lies opposite to `dir` (which points toward origin), so center - dir * len.
+            let outer = center - dir * arrow_len;
+            let Some(s_outer) = project(outer) else { continue };
+            painter.line_segment([s_center, s_outer], egui::Stroke::new(1.5, this_arrow_color));
+            if is_entry {
+                draw_arrowhead(painter, s_outer, s_center, this_arrow_color);
+            } else {
+                draw_arrowhead(painter, s_center, s_outer, this_arrow_color);
+            }
+        } else {
+            // Bidirectional arrows for regular gates: one toward origin, one away.
+            let tip_inward  = center + dir * arrow_len;
+            let tip_outward = center - dir * arrow_len;
+            let Some(s_inward)  = project(tip_inward)  else { continue };
+            let Some(s_outward) = project(tip_outward) else { continue };
+            painter.line_segment([s_center, s_inward],  egui::Stroke::new(1.5, this_arrow_color));
+            painter.line_segment([s_center, s_outward], egui::Stroke::new(1.5, this_arrow_color));
+            draw_arrowhead(painter, s_inward,  s_center, this_arrow_color);
+            draw_arrowhead(painter, s_outward, s_center, this_arrow_color);
+        }
     }
 }
 
