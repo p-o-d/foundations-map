@@ -147,3 +147,31 @@ mod tests {
         assert_eq!(w.entities_in_sector(sector_a()).len(), 2);
     }
 }
+
+/// Metadata for a single X4 save-game snapshot.
+#[derive(Debug, Clone)]
+pub struct SnapshotMeta {
+    pub path: std::path::PathBuf,
+    pub mtime: std::time::SystemTime,
+    pub game_time_seconds: f32,
+    pub player_money: u64,
+    pub player_location_name: String,
+}
+
+#[cfg(test)]
+mod snapshot_meta_tests {
+    use super::SnapshotMeta;
+
+    #[test]
+    fn snapshot_meta_construction() {
+        let m = SnapshotMeta {
+            path: "/tmp/save.xml.gz".into(),
+            mtime: std::time::UNIX_EPOCH,
+            game_time_seconds: 1734.285,
+            player_money: 40000,
+            player_location_name: "Argon Prime".into(),
+        };
+        assert_eq!(m.player_money, 40000);
+        assert!((m.game_time_seconds - 1734.285).abs() < 1e-3);
+    }
+}
