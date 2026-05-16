@@ -1,306 +1,213 @@
-# X4 Foundations Interactive Map — Design Spec
+# X4 Foundations Map — Design Spec
 
-**Date:** 2026-05-14  
-**Status:** Approved  
-**Stack:** Rust, egui, wgpu, winit  
-**Platforms:** Linux (Wayland + X11), Windows
-
----
+**Last revised:** 2026-05-15 (post Phase 2)
 
 ## Overview
 
-Interactive map application for the game X4 Foundations. Shows the full universe as a 2D sector graph. Any sector can be explored in a true 3D view with live object data overlaid from the running game. Reference aesthetic: X3 map by Scorp, modernised to a dark dashboard style.
-
----
+A standalone Rust desktop app that visualizes X4 Foundations' universe and lets the player inspect sectors at any zoom level — from full galaxy to individual gates inside one sector. Reads game data from cat/dat archives at startup; in Phase 3 will read save-game snapshots for live(-ish) ship + station state.
 
 ## Data Sources
 
-Two data sources, both handled by `map-io`, both optional independently:
+Two sources, loaded independently:
 
-| Source | What it provides | How accessed |
-|---|---|---|
-| X4 game XML files | Universe layout, sector contents, static objects | Parsed at startup from game install dir |
-| X4 HTTP API (mod) | Live ship positions, states, factions | Polled periodically; optional |
+**Static (cat/dat archives)** — universe topology and fixed placements:
+- `maps/xu_ep2_universe/galaxy.xml` — cluster positions
+- `maps/xu_ep2_universe/clusters.xml` — sector→cluster + intra-cluster superhighway connections
+- `maps/xu_ep2_universe/sectors.xml` — superhighway endpoint zones (SHCon)
+- `maps/xu_ep2_universe/zones.xml` — gate positions/quaternions + ref="asteroids" objects
+- `libraries/mapdefaults.xml` — macro → translation page+text id
+- `libraries/god.xml` — fixed objects + station spawn rules
+- `t/0001-l044.xml` — English translation table (pages 20003 cluster, 20004 sector)
+- Every DLC ships its own copies under the same `maps/xu_ep2_universe/` directory (with `dlc_*` prefixes) and overlays `galaxy.xml` via XML `<diff>/<add>` patches; all merged at load.
 
-App is fully usable without the live API — static map remains functional. Live data enriches the sector 3D view when available.
-
----
+**Dynamic (save files)** — Phase 3:
+- `~/.config/EgoSoft/X4/<id>/save/{quicksave,save_NNN}.xml.gz`
+- Gzipped XML, ~30 MB compressed / ~300 MB raw
+- Full universe state: 1300+ stations, 10k+ ships, faction relations, player money/location, time
 
 ## Workspace Structure
 
-Cargo workspace with three crates enforcing strict layer separation:
-
 ```
-foundations-map/
-├── Cargo.toml                    (workspace)
-├── crates/
-│   ├── map-domain/               # pure data model — no IO, no UI
-│   ├── map-io/                   # XML parsing, game path detection, HTTP client
-│   └── map-app/                  # egui + wgpu presentation
-└── docs/
+crates/
+  map-domain/   — Types + invariants. No I/O. No egui.
+  map-io/       — cat/dat reader, XML parsers, game-path detect, (Phase 3) save reader
+  map-app/      — egui app + wgpu renderer (binary: foundations-map)
 ```
-
-**Dependency graph:**
-
-```
-map-domain  ←──  map-io  ←──  map-app
-                                 │
-                           egui + wgpu + winit
-```
-
-`map-domain` has zero UI or IO dependencies. It can be compiled, tested, and reused as a headless library. `map-app` cannot exist without the domain but the domain can exist without `map-app`.
-
----
 
 ## Data Model (`map-domain`)
 
-### Static Universe
-
 ```rust
-struct Universe {
-    sectors: Vec<Sector>,
-    connections: Vec<Connection>,
+// Hierarchy (loaded from static data)
+pub struct Universe {
+    pub sectors:     Vec<Sector>,
+    pub clusters:    Vec<Cluster>,
+    pub connections: Vec<Connection>,
 }
 
-struct Sector {
-    id: SectorId,
-    name: String,
-    faction: Option<FactionId>,
-    map_position: Vec2,           // projected from X4 galaxy 3D coords (y discarded, x/z → 2D)
+pub struct Cluster { id: ClusterId, name, map_position: Vec2, radius: f32 }
+pub struct Sector  {
+    id: SectorId, name, faction: Option<FactionId>, map_position: Vec2,
     static_objects: Vec<StaticObject>,
+    cluster_id: Option<ClusterId>, index_in_cluster: u32, cluster_sector_count: u32,
 }
+pub struct Connection { from: SectorId, to: SectorId, gate_type: GateType }
+pub enum GateType { Standard, Superhighway }
 
-struct Connection {
-    from: SectorId,
-    to: SectorId,
-    gate_type: GateType,          // StandardGate | Superhighway
+pub struct StaticObject {
+    id: ObjectId, kind: StaticObjectKind, position: Vec3, faction: Option<FactionId>,
+    name: String, rotation: Option<(f32,f32,f32)>, details: Vec<(String,String)>,
 }
+pub enum StaticObjectKind { Station, Gate, ResourceZone, Anomaly, Highway }
 
-struct StaticObject {
-    id: ObjectId,
-    kind: StaticObjectKind,       // Station | Gate | ResourceZone | Anomaly
-    position: Vec3,
-    faction: Option<FactionId>,
-    name: String,
-}
-```
-
-### Live Entity Store (ECS-like)
-
-Sparse component store for live game objects (ships, live station states). Plain `HashMap`-per-component — no ECS crate dependency.
-
-```rust
-type EntityId = u32;
-
-struct World {
-    names:       HashMap<EntityId, String>,
-    positions:   HashMap<EntityId, Vec3>,
-    velocities:  HashMap<EntityId, Vec3>,
-    factions:    HashMap<EntityId, FactionId>,
-    kinds:       HashMap<EntityId, LiveObjectKind>,
-    sectors:     HashMap<EntityId, SectorId>,
-    // denormalised for fast O(1) sector queries
-    sector_idx:  HashMap<SectorId, Vec<EntityId>>,
-}
-```
-
-Systems are plain functions — no trait magic:
-
-```rust
-fn update_positions(world: &mut World, updates: &[PositionUpdate]);
-fn entities_in_sector(world: &World, sector: SectorId) -> &[EntityId];
-fn build_search_index(universe: &Universe, world: &World) -> SearchIndex;
-```
-
-### Reactivity
-
-The side panel (and any other UI reading live data) must reflect changes in the data model as soon as they happen — no manual refresh, no polling from the UI side.
-
-**Mechanism:**
-
-- `World` is wrapped in `Arc<RwLock<World>>` shared between the IO thread and the UI thread
-- The `map-io` live client writes updates on its own thread (acquiring write lock per poll cycle)
-- After each write, the client calls `egui::Context::request_repaint()` to wake the render loop
-- The UI thread reads a snapshot via read lock at the start of each frame — panel always shows current state
-- `map-domain` itself has no knowledge of this mechanism; `Arc<RwLock<>>` is wired in `map-app`
-
-**Consequence:** any component that displays live data (ship counts, object positions, connection status) is automatically up-to-date each frame after a repaint is triggered. No pub/sub, no channels for UI updates — egui's immediate mode makes the data model the single source of truth.
-
-### View State Machine
-
-```rust
-enum ViewMode {
+// View state
+pub enum ViewMode {
     UniverseMap { selected: Option<SectorId> },
-    SectorView   { sector: SectorId, selected_obj: Option<ObjectId> },
+    SectorView  { sector: SectorId, selected_obj: Option<ObjectId> },
 }
+
+// Live entity store — populated in Phase 3 from save files
+pub struct World { /* names, positions, velocities, factions, kinds, sectors, sector_idx */ }
 ```
 
----
+`details: Vec<(String,String)>` is a free-form kv bag so each object kind can expose
+different metadata (Race/Owner/Type/Gamestart for stations, Direction/Destination for
+highways, Macro for god objects) without changing the domain on every iteration.
 
-## Search (`map-domain`)
+## Sector Layout Trick
 
-In-memory index, no external search dependency.
+X4 sectors within a cluster can be 100+ map units apart in the in-game travel sense
+(`clusters.xml` offsets). On the **map**, X4 ignores those and lays out sectors
+hexagonally inside the parent cluster.
 
-```rust
-struct SearchEntry {
-    id: ObjectId,
-    name: String,
-    kind: EntryKind,              // Sector | Station | Gate | Ship | ResourceZone
-    sector: SectorId,
-    faction: Option<FactionId>,
-}
+We do the same: every sector's `map_position` = cluster center. Per-sector layout
+offset is computed at render time as a hex pattern (1/2/3 sector special cases,
+circle fallback for 4+), scaled by `hex_r` so spacing stays correct at every zoom level.
+`Sector.{cluster_id, index_in_cluster, cluster_sector_count}` carries the layout state.
 
-struct SearchIndex {
-    entries: Vec<SearchEntry>,
-}
-```
+## Static Object Loading
 
-Index rebuilt from `Universe` + `World` on startup and after each live data update cycle.
+Numeric ranges keep object IDs from colliding across sources:
 
-**Scoping by view mode:**
-
-| View | Scope | Result click action |
+| Range | Source | Count today |
 |---|---|---|
-| `UniverseMap` | All sectors + all objects | Pan map to sector, select it |
-| `SectorView3D` | Current sector only | Select object in 3D, orbit camera to it |
+| 10k+ | gates (zones.xml) | 448 |
+| 20k+ | non-gate zone objects (asteroids) | 7 |
+| 30k+ | god.xml fixed objects (wormholes, landmarks, debris) | 67 |
+| 40k+ | superhighway connection zones (sectors.xml SHCon) | 103 |
+| 50k+ | god.xml stations with `<position>` | 221 |
 
-Filters (additive, applied after text match): object kind, faction.
+Rotation in zones.xml is stored as quaternion (`qx qy qz qw`); converted to euler
+(pitch, yaw, roll) at parse time using `glam::EulerRot::YXZ`.
 
----
+## View State Machine (`map-domain`)
+
+```
+                 select_sector            open_sector_3d
+UniverseMap { None } ───────→ UniverseMap { Some(s) } ───────→ SectorView { sector: s, selected_obj: None }
+                                              ↑                              │
+                                              │ close_sector_3d              │ select_object(o)
+                                              └──────────────────────────────│
+                                                                             ↓
+                                                              SectorView { sector: s, selected_obj: Some(o) }
+                                                                             │
+                                                                             │ deselect_object (Escape)
+                                                                             ↓
+                                                              SectorView { sector: s, selected_obj: None }
+```
+
+State transitions are pure functions on `ViewMode`. All UI events feed through them.
+
+## Search (Phase 4, deferred)
+
+Universe-wide index over: sector name, cluster name, static object name, station owner,
+gate destination. Suffix-array or simple fuzzy matcher. Result types differentiated by
+icon. Sector-scoped search filters to selected sector only.
 
 ## UI Layout (`map-app`)
 
-### State 1 — Universe Map (default)
-
 ```
-┌─────────────────────────────────────────┬──────────────┐
-│  FOUNDATIONS MAP        ⌕ Search...     │              │
-├─────────────────────────────────────────┤  Right panel │
-│                                         │              │
-│         2D Universe Map                 │  SECTOR      │
-│         (pan + zoom)                    │  <name>      │
-│                                         │  <faction>   │
-│    [sector nodes + gate connections]    │              │
-│                                         │  CONNECTIONS │
-│                                         │  → ...       │
-│                                         │              │
-│                                         │  LIVE DATA   │
-│                                         │  ships (when │
-│                                         │  API active) │
-│                                         │              │
-│                                         │ [OPEN 3D]    │
-└─────────────────────────────────────────┴──────────────┘
+┌────────────────────────────────────────────────────┬─────────────┐
+│  TopBar — 36 px (search, mode toggle, time clock)   │             │
+├────────────────────────────────────────────────────┤  SectorPanel│
+│                                                    │  220 px     │
+│   CentralPanel:                                    │  scrollable │
+│     UniverseMap   OR   SectorView3D                │             │
+│                                                    │             │
+└────────────────────────────────────────────────────┴─────────────┘
 ```
 
-- Double-click sector → opens 3D view (primary trigger)
-- "OPEN 3D VIEW" button in right panel → secondary trigger
-- Right panel shows selected sector info: name, faction, connections, live ship count
+**UniverseMap:** hex-tiled 2D, pan/zoom, fit-on-resize, faction-colored sectors,
+cluster background hexes, animated dashed one-way superhighways.
 
-### State 2 — 3D Sector View
+**SectorView3D:** wgpu scene inside a paint callback, orbit camera, gates rendered
+as screen-space circles + arrows (constant pixel size), other objects as 3D meshes,
+6 axis arrows from world origin, ✕ in header to close.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  FOUNDATIONS MAP              ⌕ Search (sector-scoped)   │
-├──────────────────────────────────────────────────────────┤
-│                 ╔══════════════════════╗   ┌───────────┐ │
-│  [dimmed map]   ║  ← Universe          ║   │ SELECTED  │ │
-│  [in bg]        ║  Argon Prime    ✕ ⤢ ║   │ <object>  │ │
-│                 ║                      ║   │           │ │
-│                 ║   3D sector view     ║   │ SECTOR    │ │
-│                 ║   (80% excl. panel)  ║   │ (collapsed│ │
-│                 ║                      ║   │  summary) │ │
-│                 ║   rotate · zoom      ║   │           │ │
-│                 ║                      ║   │ OBJECTS   │ │
-│                 ╚══════════════════════╝   │ • Station │ │
-│                                            │ • Gate    │ │
-│                                            │ • Ships   │ │
-└────────────────────────────────────────────┴───────────┘ │
-```
-
-- 3D panel: centered, 80% of window width excluding right panel
-- Map visible but dimmed behind 3D panel; not interactive while 3D open
-- Right panel switches: sector info → collapsed sector summary + sector objects list
-- Clicking object in 3D list or 3D view: selects it, panel shows object detail, camera orbits to it
-- `Escape`: deselect object + reset camera to fit-all-sector view
-- `✕` or `← Universe`: close 3D panel, return to map view
-- Resize handle on 3D panel edge (default 80%, user-adjustable)
-
----
+**SectorPanel:** scrollable. Universe view → connections list. Sector view → objects list + selected-object detail (name, type, position, faction, rotation, all `details` kv).
 
 ## 3D Renderer (`map-app/renderer`)
 
-**Backend:** wgpu (Vulkan on Linux, DX12 on Windows, auto-selected)
-
-**Camera:** orbit-only (no pan)
-
-```rust
-struct OrbitCamera {
-    target: Vec3,       // sector center by default; selected object position when object selected
-    distance: f32,      // clamped: [min_fit_all, max_zoom_in]
-    yaw: f32,
-    pitch: f32,         // clamped to avoid gimbal flip
-}
-```
-
-- Default: `target = sector_center`, distance = fits all sector contents in view
-- On object select: `target` transitions to object position (smooth lerp)
-- `Escape`: `target` resets to sector center, distance resets to fit-all
-- Rendered to wgpu texture → displayed inside egui `Image` widget
-
-**Object representation (Phase 1–2):**
-- Stations: box mesh, faction colour tint, label billboard
-- Gates: torus/ring mesh, green tint
-- Ships: small sphere or simplified ship silhouette (live data only)
-- Resource zones: transparent sphere, desaturated green
-
----
+- wgpu via `egui_wgpu::CallbackTrait`
+- One pipeline, one bind group, dynamic uniform buffer (256-byte stride × 128 slots)
+- No depth attachment (egui paint callback constraint); painter's algorithm via draw order
+- Meshes generated at startup: box, sphere, ring
+- `OrbitCamera`: spherical coords, target locked to world origin, FOV 60°, near 0.1 km, far 2,000,000 km
 
 ## Cross-Platform
 
-| Concern | Linux | Windows |
-|---|---|---|
-| Window/input | winit (`wayland` + `wayland-dlopen` features) | winit default |
-| GPU backend | Vulkan (wgpu auto-selects) | DX12 → Vulkan fallback |
-| Game path | `~/.steam/steam/steamapps/common/X4 Foundations` | Registry `Steam App 392160` → fallback `Program Files` |
-| Distribution | `.tar.gz` or AppImage | `.exe` (static) or NSIS installer |
+Linux (Wayland primary) + Windows. Steam library detection on both. eframe handles
+wgpu surface init. Native dialog for manual game-path override (Phase 4).
 
-Paths always handled via `std::path::PathBuf` — no hardcoded separators.
+## Phased Implementation
 
----
+### Phase 1 — Data + 2D Universe Map ✅
+Workspace skeleton, cat/dat reader, all four universe XML parsers, mapdefaults
++ translations, faction colors, sector panel, top bar, theme. Completed.
 
-## Phased Implementation Plan
+### Phase 2 — 3D Sector View ✅
+wgpu pipeline, orbit camera, static objects, object selection, side-panel detail.
+Completed plus bonus: stations from god.xml, superhighway endpoints, cluster hexes
+(via synthesized hex layout), animated dashed one-way superhighways, full property
+list in panel. See retrospective `2026-05-15-phase2-retro.md`.
 
-### Phase 1 — Data + 2D Universe Map
-- Cargo workspace setup (3 crates)
-- `map-domain`: Universe, Sector, Connection, StaticObject types + unit tests
-- `map-io`: X4 XML parser with fixture-based integration tests; game path detection
-- `map-app`: egui window, 2D map view (pan + zoom), sector selection, right panel (sector info)
+### Phase 3 — Live Data (save-game snapshots)
+**Pivot from original spec.** The HTTP API mod referenced earlier (Alia5's
+`X4-rest-server`) has been inactive since April 2023 and likely doesn't work with
+current game builds. Egosoft does not ship an official live API.
 
-### Phase 2 — 3D Sector View
-- wgpu renderer integrated into egui via texture
-- Orbit camera (rotate + zoom, fit-all default)
-- Static objects rendered (stations, gates, resource zones)
-- Object selection in 3D → right panel detail
-- `Escape` / close panel behaviour
+New approach: parse the save game XML.
 
-### Phase 3 — Live Data
-- `map-io`: X4 HTTP API client, periodic polling, `World` updates
-- Live ships appear in 3D sector view
-- Search index rebuilt on live data update
-- Connection status indicator (live / offline)
+- New module `map-io::save_parser` — streaming `quick_xml::Reader` over a `flate2`
+  gzip decoder; walks `<savegame><universe><component class="galaxy">…` tree;
+  populates `World` (ships, stations) and updates `Sector.faction` from the
+  per-sector `owner` attribute
+- File watcher (`notify` crate) on `~/.config/EgoSoft/X4/<id>/save/`; reparses on
+  modify. Manual refresh button as fallback
+- Top-bar indicator: "Snapshot: 2026-05-15 14:23  (3m ago)"
+- Live ships render in 3D sector view; in 2D map a per-sector ship count badge
+- Acceptance: parsing user's quicksave under 5 seconds on dev machine; UI stays
+  responsive (parse on background thread, channel completed `World` back)
+
+Spec: `docs/superpowers/specs/2026-05-15-phase3-livedata.md` (next).
 
 ### Phase 4 — Search + Polish
-- Full search implementation (universe-scoped + sector-scoped)
-- UI polish: smooth pan/zoom, camera lerp, loading states
-- Auto game-path detection with manual override fallback
-- Distribution builds (Linux + Windows CI)
-
----
+Universe + sector-scoped search, camera lerp on selection, smooth pan/zoom inertia,
+manual game-path override dialog, CI distribution builds (Linux deb + Windows zip).
 
 ## TDD Rules
 
-- `map-domain`: pure unit tests — all domain logic tested headlessly
-- `map-io`: integration tests against XML fixtures in `crates/map-io/tests/fixtures/`; HTTP client tested with mock server (`mockito`)
-- `map-app`: `AppState` + `ViewMode` state machine tested as pure functions; camera math unit tested; renderer not unit tested (verified visually per phase)
-- Never mock `map-domain` types — always use real domain values in tests
+- `map-domain`: pure unit tests; all state transitions covered headlessly
+- `map-io`: integration tests against XML fixtures in `crates/map-io/tests/fixtures/`;
+  save parser will need a small synthetic save fixture or a heavily trimmed real one
+- `map-app`: state-machine tests on `ViewMode`; camera math unit tests; renderer
+  verified visually per phase
+- Never mock `map-domain` types — use real values in tests
 - Phase does not advance until its tests pass
+
+## Open Questions
+
+- Save-file size (~300 MB raw XML): worth pre-filtering during stream to skip
+  obviously irrelevant subtrees (engine state, NPC dialogue, etc.)?
+- Locale: hard-coded `l044` (English) for now. Detect from Steam VDF later.
+- Faction colors: 8-color palette is reused mod 8 — fine while < 8 factions visible
+  on screen; revisit if Phase 3 surfaces all 20+ factions on universe map.

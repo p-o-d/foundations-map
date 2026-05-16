@@ -1,5 +1,7 @@
 # Phase 1: Workspace Setup + Data Model + 2D Universe Map
 
+> **Status:** ✅ Completed. Historical reference only. Current architecture has diverged — see `docs/superpowers/specs/2026-05-14-x4-map-design.md` and `CLAUDE.md` for current design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Cargo workspace with 3 crates, full domain model with tests, X4 XML parser, and a working 2D universe map with pan/zoom/selection running in egui.
