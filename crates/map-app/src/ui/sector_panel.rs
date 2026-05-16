@@ -139,6 +139,7 @@ fn kind_icon(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
         Gate         => "◯",
         ResourceZone => "◎",
         Anomaly      => "✦",
+        Highway      => "⇒",
     }
 }
 
@@ -149,6 +150,7 @@ fn kind_label(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
         Gate         => "Gate",
         ResourceZone => "Resource zone",
         Anomaly      => "Anomaly",
+        Highway      => "Highway",
     }
 }
 

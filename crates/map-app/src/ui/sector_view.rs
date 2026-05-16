@@ -122,18 +122,22 @@ impl SectorView3D {
 
 /// Build per-object draw calls with model matrix (translate + scale) and color.
 fn build_draw_calls(sector: &Sector, selected: Option<ObjectId>) -> Vec<DrawCall> {
-    sector.static_objects.iter().filter(|obj| obj.kind != StaticObjectKind::Gate).map(|obj| {
+    sector.static_objects.iter()
+        .filter(|obj| !matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway))
+        .map(|obj| {
         let scale = match obj.kind {
             StaticObjectKind::Station      => 3.0,
             StaticObjectKind::Gate         => 4.0,
             StaticObjectKind::ResourceZone => 8.0,
             StaticObjectKind::Anomaly      => 2.0,
+            StaticObjectKind::Highway      => 4.0,
         };
         let kind = match obj.kind {
             StaticObjectKind::Station      => MeshKind::Box,
             StaticObjectKind::Gate         => MeshKind::Ring,
             StaticObjectKind::ResourceZone => MeshKind::Sphere,
             StaticObjectKind::Anomaly      => MeshKind::Sphere,
+            StaticObjectKind::Highway      => MeshKind::Ring,
         };
         let color = if selected == Some(obj.id) {
             [1.0, 0.8, 0.1, 1.0]  // yellow = selected
@@ -159,6 +163,7 @@ fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
         StaticObjectKind::Gate         => [0.2, 0.9, 0.4, 1.0],
         StaticObjectKind::ResourceZone => [0.5, 0.3, 0.9, 0.5],
         StaticObjectKind::Anomaly      => [1.0, 0.4, 0.2, 1.0],
+        StaticObjectKind::Highway      => [0.3, 0.9, 0.5, 1.0],
     }
 }
 
@@ -272,7 +277,7 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
     const SEGMENTS: usize = 32;
 
     for obj in &sector.static_objects {
-        if obj.kind != StaticObjectKind::Gate { continue; }
+        if !matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway) { continue; }
 
         // Arrow direction: horizontal toward sector center (Y=0 plane).
         let mut dir = -obj.position;
@@ -280,10 +285,10 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
         if dir.length() < 0.001 { continue; }
         let dir = dir.normalize();
 
-        // Identify superhighway vs regular gate by name prefix.
-        let name_lower = obj.name.to_lowercase();
-        let is_superhighway = name_lower.starts_with("superhighway");
-        let is_entry = is_superhighway && name_lower.contains("entry");
+        let is_superhighway = matches!(obj.kind, StaticObjectKind::Highway);
+        // Entry vs exit: check details for "Direction" key set to "Outbound" or fall back to name.
+        let is_entry = is_superhighway
+            && obj.details.iter().any(|(k, v)| k == "Direction" && v == "Outbound");
         // Pick colors per kind.
         let (this_ring_color, this_arrow_color) = if is_superhighway {
             (

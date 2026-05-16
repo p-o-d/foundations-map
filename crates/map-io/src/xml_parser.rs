@@ -343,7 +343,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                     let _ = &mut details;
                     sector.static_objects.push(StaticObject {
                         id:       ObjectId(40_000 + sh_counter),
-                        kind:     StaticObjectKind::Gate,
+                        kind:     StaticObjectKind::Highway,
                         position: Vec3::new(x, y, z),
                         faction:  None,
                         name,

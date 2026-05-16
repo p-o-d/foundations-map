@@ -7,6 +7,7 @@ pub enum StaticObjectKind {
     Gate,
     ResourceZone,
     Anomaly,
+    Highway,
 }
 
 #[derive(Debug, Clone)]
