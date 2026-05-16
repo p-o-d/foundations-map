@@ -18,6 +18,8 @@ pub struct App {
     map_view:         MapView,
     sector_panel:     SectorPanel,
     sector_view:      SectorView3D,
+    /// Keeps the save-dir watcher alive; dropping it would stop the watcher.
+    _save_watcher:    Option<map_io::save_watcher::RecommendedWatcher>,
 }
 
 impl App {
@@ -26,6 +28,7 @@ impl App {
         universe: Universe,
         snapshot_tx: mpsc::Sender<SnapshotMessage>,
         snapshot_rx: mpsc::Receiver<SnapshotMessage>,
+        save_watcher: Option<map_io::save_watcher::RecommendedWatcher>,
     ) -> Self {
         crate::theme::apply(&cc.egui_ctx);
 
@@ -45,6 +48,7 @@ impl App {
             map_view:     MapView::default(),
             sector_panel: SectorPanel::default(),
             sector_view:  SectorView3D::default(),
+            _save_watcher: save_watcher,
         }
     }
 }

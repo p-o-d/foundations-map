@@ -36,6 +36,36 @@ fn main() -> eframe::Result<()> {
         let _ = initial_tx.send(msg);
     });
 
+    // Start a watcher on the save directory; whenever a .xml.gz settles,
+    // kick off a fresh save parse via the existing snapshot channel.
+    let watcher = if let Some(dir) = save_dir() {
+        let (wtx, wrx) = std::sync::mpsc::channel();
+        match map_io::save_watcher::watch_save_dir(&dir, wtx) {
+            Ok(w) => {
+                eprintln!("[map] Watching save dir: {:?}", dir);
+                let parse_tx = snapshot_tx.clone();
+                let sector_macros = universe.sector_macros.clone();
+                std::thread::spawn(move || {
+                    for event in wrx {
+                        match event {
+                            map_io::save_watcher::WatcherEvent::SaveChanged(path) => {
+                                eprintln!("[map] Save changed: {:?}", path);
+                                spawn_save_parse(parse_tx.clone(), sector_macros.clone());
+                            }
+                        }
+                    }
+                });
+                Some(w)
+            }
+            Err(e) => {
+                eprintln!("[map] save watcher failed: {:?}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Foundations Map")
@@ -47,7 +77,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Foundations Map",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, universe, snapshot_tx, snapshot_rx)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, universe, snapshot_tx, snapshot_rx, watcher)))),
     )
 }
 
