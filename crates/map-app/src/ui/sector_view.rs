@@ -243,56 +243,76 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
     }
 }
 
-/// Draw gates as screen-space circle outlines + bidirectional arrows at constant pixel size.
-/// Circle radius and arrow length stay fixed in pixels regardless of zoom.
-/// Arrow direction = gate forward (Z axis rotated by gate quaternion → horizontal facing direction).
+/// Draw gates with correct orientation at constant pixel size on screen.
+/// Arrow lies on the Y=0 horizontal plane, points toward sector center (origin), single-sided.
+/// Ring is in 3D plane perpendicular to the arrow direction, polyline projected to screen.
+/// World-space size derived from camera distance so on-screen size stays constant.
 fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera, sector: &Sector) {
     let aspect = view_rect.width() / view_rect.height().max(1.0);
     let vp = camera.proj_matrix(aspect) * camera.view_matrix();
+    let cam_eye = camera.eye();
+    // 2 * tan(fov_y / 2). FOV here matches OrbitCamera::proj_matrix (60° vertical).
+    let fov_factor = 2.0 * 30.0_f32.to_radians().tan();
 
     let project = |world: Vec3| -> Option<egui::Pos2> {
         let clip = vp * world.extend(1.0);
         if clip.w <= 0.0 { return None; }
         let ndc = clip.truncate() / clip.w;
-        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        if ndc.x.abs() > 2.0 || ndc.y.abs() > 2.0 { return None; }
         Some(egui::Pos2::new(
             (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
             (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
         ))
     };
 
-    let ring_color  = egui::Color32::from_rgba_premultiplied(100, 200, 255, 220);
-    let arrow_color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 200);
-    const RING_R: f32  = 18.0;
-    const ARROW_A: f32 = 28.0; // px from center to arrowhead tip
+    let ring_color  = egui::Color32::from_rgba_premultiplied(100, 200, 255, 230);
+    let arrow_color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 230);
+    const RING_PX:  f32   = 18.0;
+    const ARROW_PX: f32   = 32.0;
+    const SEGMENTS: usize = 32;
 
     for obj in &sector.static_objects {
         if obj.kind != StaticObjectKind::Gate { continue; }
 
-        let Some(sc) = project(obj.position) else { continue };
+        // Arrow direction: horizontal toward sector center (Y=0 plane).
+        let mut dir = -obj.position;
+        dir.y = 0.0;
+        if dir.length() < 0.001 { continue; }
+        let dir = dir.normalize();
 
-        // Constant-size circle outline
-        painter.circle_stroke(sc, RING_R, egui::Stroke::new(1.5, ring_color));
+        // Distance from camera → world units per pixel for constant on-screen size.
+        let dist = (obj.position - cam_eye).length();
+        let world_per_px = dist * fov_factor / view_rect.height();
+        let radius    = RING_PX  * world_per_px;
+        let arrow_len = ARROW_PX * world_per_px;
 
-        // Gate forward = Z rotated by gate orientation (gate stands upright, yaw rotates facing)
-        let (pitch, yaw, roll) = obj.rotation.unwrap_or((0.0, 0.0, 0.0));
-        let rot = Mat4::from_euler(
-            glam::EulerRot::YXZ,
-            yaw.to_radians(), pitch.to_radians(), roll.to_radians(),
-        );
-        let forward = rot.transform_vector3(Vec3::Z);
+        // Ring plane axes: perpendicular to `dir`. Up axis = Y; side axis = dir × Y.
+        let axis_side = dir.cross(Vec3::Y).normalize();
+        let axis_up   = Vec3::Y;
 
-        // Project a point 50 km along forward to get screen-space 2D direction
-        let Some(sf) = project(obj.position + forward * 50.0) else { continue };
-        let screen_dir = (sf - sc).normalized();
-        if screen_dir.length() < 0.01 { continue; }
+        // 32-segment polyline approximating the ring in 3D, projected to screen.
+        let mut pts = Vec::with_capacity(SEGMENTS);
+        let mut all_ok = true;
+        for i in 0..SEGMENTS {
+            let t = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
+            let p = obj.position + radius * (t.cos() * axis_side + t.sin() * axis_up);
+            match project(p) {
+                Some(sp) => pts.push(sp),
+                None     => { all_ok = false; break; }
+            }
+        }
+        if !all_ok { continue; }
+        for i in 0..SEGMENTS {
+            painter.line_segment([pts[i], pts[(i + 1) % SEGMENTS]], egui::Stroke::new(1.5, ring_color));
+        }
 
-        // Arrow at constant pixel length, bidirectional
-        let p_a = sc - screen_dir * ARROW_A;
-        let p_b = sc + screen_dir * ARROW_A;
-        painter.line_segment([p_a, p_b], egui::Stroke::new(1.5, arrow_color));
-        draw_arrowhead(painter, p_b, p_a, arrow_color);
-        draw_arrowhead(painter, p_a, p_b, arrow_color);
+        // Arrow on Y=0 plane: starts at gate (X,0,Z), extends toward origin, single arrowhead at far end.
+        let a_start_world = Vec3::new(obj.position.x, 0.0, obj.position.z);
+        let a_end_world   = a_start_world + dir * arrow_len;
+        let Some(s_start) = project(a_start_world) else { continue };
+        let Some(s_end)   = project(a_end_world)   else { continue };
+        painter.line_segment([s_start, s_end], egui::Stroke::new(1.5, arrow_color));
+        draw_arrowhead(painter, s_end, s_start, arrow_color);
     }
 }
 
