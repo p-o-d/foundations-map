@@ -145,20 +145,19 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     cluster_macros.sort(); // deterministic ID assignment
     for cluster_macro in cluster_macros {
         let positions = cluster_to_sector_positions.get(&cluster_macro).cloned().unwrap_or_default();
-        if positions.is_empty() { continue; }
-        // Use the centroid of the cluster's sectors (already in map coords).
-        // Avoids depending on galaxy.xml positions, which are missing for some DLC clusters
-        // and would otherwise leave center=(0,0) → cluster hex covering the entire map.
+        // Only render clusters that group multiple sectors; single-sector clusters add no info.
+        if positions.len() < 2 { continue; }
+        // Centroid of the cluster's sectors (already in map coords).
         let cx_sum: f32 = positions.iter().map(|p| p.x).sum();
         let cy_sum: f32 = positions.iter().map(|p| p.y).sum();
         let n = positions.len() as f32;
         let center = Vec2::new(cx_sum / n, cy_sum / n);
-        let max_dist = positions
+        // Store raw max sector-to-centroid distance in map units; renderer adds sector-hex padding.
+        let radius = positions
             .iter()
             .map(|p| (*p - center).length())
-            .fold(0.0_f32, f32::max);
-        // Padding is in map units; cap radius so over-sparse clusters don't dominate the view.
-        let radius = (max_dist + 1.5).min(8.0);
+            .fold(0.0_f32, f32::max)
+            .min(8.0);
         let name = name_refs
             .get(&cluster_macro.to_lowercase())
             .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))

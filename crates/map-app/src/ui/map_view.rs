@@ -235,7 +235,9 @@ impl MapView {
         // Cluster background hexes — drawn before connections + sectors so they sit behind.
         for cluster in &universe.clusters {
             let center = self.universe_to_screen(rect, cluster.map_position);
-            let r_pixels = (cluster.radius * self.zoom).max(hex_r * 1.4);
+            // cluster.radius is max sector-to-centroid distance in map units.
+            // Add the sector hex pixel radius + margin so the cluster hex encloses sector hexes.
+            let r_pixels = cluster.radius * self.zoom + hex_r * 1.3 + 6.0;
             let pts: Vec<Pos2> = (0..6)
                 .map(|i| {
                     let a = std::f32::consts::FRAC_PI_3 * i as f32;
