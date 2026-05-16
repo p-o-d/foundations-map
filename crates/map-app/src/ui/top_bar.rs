@@ -1,3 +1,5 @@
+use map_domain::world::SnapshotMeta;
+
 pub struct TopBar {
     pub search_text: String,
 }
@@ -9,7 +11,7 @@ impl Default for TopBar {
 }
 
 impl TopBar {
-    pub fn show(&mut self, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ui: &mut egui::Ui, snapshot: Option<&SnapshotMeta>) {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             ui.colored_label(crate::theme::ACCENT, "FOUNDATIONS MAP");
@@ -18,6 +20,16 @@ impl TopBar {
                 .hint_text("⌕ Search sectors, stations, ships...")
                 .desired_width(300.0);
             ui.add(search);
+
+            if let Some(meta) = snapshot {
+                ui.add_space(16.0);
+                ui.label(format!(
+                    "Snapshot: t={:.0}s  ${}  @{}",
+                    meta.game_time_seconds,
+                    meta.player_money,
+                    meta.player_location_name,
+                ));
+            }
         });
     }
 }

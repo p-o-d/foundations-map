@@ -14,3 +14,4 @@ eframe = { version = "0.34.2", features = ["wgpu"] }
 egui = "0.34.2"
 glam = "0.32.1"
 bytemuck = { version = "1", features = ["derive"] }
+dirs = "5"

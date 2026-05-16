@@ -1,5 +1,6 @@
 use map_domain::universe::Universe;
 use map_domain::view::ViewMode;
+use map_domain::world::{SnapshotMeta, World};
 use crate::ui::{top_bar::TopBar, map_view::MapView, sector_panel::SectorPanel, sector_view::SectorView3D};
 use crate::renderer::camera::OrbitCamera;
 
@@ -7,6 +8,7 @@ pub struct App {
     pub universe:     Universe,
     pub view_mode:    ViewMode,
     pub camera:       OrbitCamera,
+    pub snapshot:     Option<(SnapshotMeta, World)>,
     top_bar:          TopBar,
     map_view:         MapView,
     sector_panel:     SectorPanel,
@@ -14,7 +16,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, universe: Universe) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        universe: Universe,
+        snapshot: Option<(SnapshotMeta, World)>,
+    ) -> Self {
         crate::theme::apply(&cc.egui_ctx);
 
         if let Some(rs) = &cc.wgpu_render_state {
@@ -26,6 +32,7 @@ impl App {
             universe,
             view_mode: ViewMode::initial(),
             camera:       OrbitCamera::default(),
+            snapshot,
             top_bar:      TopBar::default(),
             map_view:     MapView::default(),
             sector_panel: SectorPanel::default(),
@@ -52,7 +59,8 @@ impl eframe::App for App {
         egui::Panel::top("top_bar")
             .exact_size(36.0)
             .show_inside(ui, |ui| {
-                self.top_bar.show(ui);
+                let meta = self.snapshot.as_ref().map(|(m, _)| m);
+                self.top_bar.show(ui, meta);
             });
 
         egui::Panel::right("sector_panel")
