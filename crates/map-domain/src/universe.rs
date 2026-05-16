@@ -1,5 +1,5 @@
 use glam::Vec2;
-use crate::ids::{SectorId, FactionId};
+use crate::ids::{SectorId, FactionId, ClusterId};
 use crate::objects::StaticObject;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,9 +25,20 @@ pub struct Sector {
     pub static_objects: Vec<StaticObject>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Cluster {
+    pub id: ClusterId,
+    pub name: String,
+    /// Cluster center in map space (same units as Sector.map_position).
+    pub map_position: Vec2,
+    /// Encompassing radius in map units — covers all sectors in this cluster plus a margin.
+    pub radius: f32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Universe {
     pub sectors: Vec<Sector>,
+    pub clusters: Vec<Cluster>,
     pub connections: Vec<Connection>,
 }
 
@@ -75,6 +86,7 @@ mod tests {
                     static_objects: vec![],
                 },
             ],
+            clusters: vec![],
             connections: vec![Connection {
                 from: a,
                 to: b,

@@ -7,9 +7,9 @@ use glam::{Vec2, Vec3};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-use map_domain::ids::{FactionId, ObjectId, SectorId};
+use map_domain::ids::{ClusterId, FactionId, ObjectId, SectorId};
 use map_domain::objects::{StaticObject, StaticObjectKind};
-use map_domain::universe::{Connection, GateType, Sector, Universe};
+use map_domain::universe::{Cluster, Connection, GateType, Sector, Universe};
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -129,6 +129,43 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             static_objects: vec![],
         });
     }
+
+    // Build cluster list: one per unique cluster_macro across all loaded sectors.
+    // Cluster center comes from galaxy.xml position. Radius encompasses all sectors in cluster.
+    let mut cluster_to_sector_positions: HashMap<String, Vec<Vec2>> = HashMap::new();
+    for sector in &sectors {
+        let Some(sector_macro) = id_to_macro.get(&sector.id) else { continue };
+        let Some((cluster_macro, _, _)) = sector_placements.get(sector_macro) else { continue };
+        cluster_to_sector_positions.entry(cluster_macro.clone()).or_default().push(sector.map_position);
+    }
+
+    let mut clusters: Vec<Cluster> = Vec::new();
+    let mut cluster_id_counter: u32 = 0;
+    let mut cluster_macros: Vec<_> = cluster_to_sector_positions.keys().cloned().collect();
+    cluster_macros.sort(); // deterministic ID assignment
+    for cluster_macro in cluster_macros {
+        let positions = cluster_to_sector_positions.get(&cluster_macro).cloned().unwrap_or_default();
+        let (cx, cz) = cluster_positions.get(&cluster_macro).copied().unwrap_or((0.0, 0.0));
+        let center = Vec2::new(cx / 1_000_000.0, cz / 1_000_000.0);
+        let max_dist = positions
+            .iter()
+            .map(|p| (*p - center).length())
+            .fold(0.0_f32, f32::max);
+        let radius = max_dist + 1.5;
+        let name = name_refs
+            .get(&cluster_macro.to_lowercase())
+            .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))
+            .cloned()
+            .unwrap_or_else(|| macro_to_display_name(&cluster_macro));
+        cluster_id_counter += 1;
+        clusters.push(Cluster {
+            id: ClusterId(cluster_id_counter),
+            name,
+            map_position: center,
+            radius,
+        });
+    }
+    eprintln!("[map] Clusters built: {}", clusters.len());
 
     let mut gate_pairs: Vec<(String, String)> = Vec::new();
     for zs in &all_zones_strs {
@@ -356,7 +393,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] Superhighway connections loaded: {}", sh_counter);
 
-    Ok(Universe { sectors, connections })
+    Ok(Universe { sectors, clusters, connections })
 }
 
 /// galaxy.xml: cluster_macro_name → absolute (x, z) position in metres.
@@ -1660,6 +1697,7 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
 
     Ok(Universe {
         sectors,
+        clusters: vec![],
         connections: vec![],
     })
 }

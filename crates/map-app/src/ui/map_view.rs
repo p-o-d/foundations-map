@@ -232,6 +232,32 @@ impl MapView {
         let time = ui.input(|i| i.time) as f32;
         let mut needs_repaint = false;
 
+        // Cluster background hexes — drawn before connections + sectors so they sit behind.
+        for cluster in &universe.clusters {
+            let center = self.universe_to_screen(rect, cluster.map_position);
+            let r_pixels = (cluster.radius * self.zoom).max(hex_r * 1.4);
+            let pts: Vec<Pos2> = (0..6)
+                .map(|i| {
+                    let a = std::f32::consts::FRAC_PI_3 * i as f32;
+                    Pos2::new(center.x + r_pixels * a.cos(), center.y + r_pixels * a.sin())
+                })
+                .collect();
+            // Faint fill, thin border
+            painter.add(egui::Shape::convex_polygon(
+                pts,
+                egui::Color32::from_rgba_unmultiplied(60, 70, 110, 25),
+                Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 130, 170, 80)),
+            ));
+            // Cluster name above the hex
+            painter.text(
+                Pos2::new(center.x, center.y - r_pixels - 4.0),
+                egui::Align2::CENTER_BOTTOM,
+                &cluster.name,
+                egui::FontId::proportional(10.0),
+                theme::TEXT_MUTED,
+            );
+        }
+
         for conn in &universe.connections {
             let from_s = universe.sector(conn.from);
             let to_s   = universe.sector(conn.to);
