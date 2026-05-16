@@ -152,12 +152,11 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         let cy_sum: f32 = positions.iter().map(|p| p.y).sum();
         let n = positions.len() as f32;
         let center = Vec2::new(cx_sum / n, cy_sum / n);
-        // Store raw max sector-to-centroid distance in map units; renderer adds sector-hex padding.
+        // Raw max sector-to-centroid distance in map units; renderer adds sector-hex padding.
         let radius = positions
             .iter()
             .map(|p| (*p - center).length())
-            .fold(0.0_f32, f32::max)
-            .min(8.0);
+            .fold(0.0_f32, f32::max);
         let name = name_refs
             .get(&cluster_macro.to_lowercase())
             .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))
