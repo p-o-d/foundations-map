@@ -21,8 +21,13 @@ pub struct Sector {
     pub name: String,
     pub faction: Option<FactionId>,
     /// Projected from X4 galaxy 3D coords: galaxy x/z → map x/y, y discarded.
+    /// This is the *cluster center* — per-sector layout offset is applied by the
+    /// renderer in pixel space so it scales with `hex_r` rather than zoom.
     pub map_position: Vec2,
     pub static_objects: Vec<StaticObject>,
+    pub cluster_id: Option<ClusterId>,
+    pub index_in_cluster: u32,
+    pub cluster_sector_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +82,9 @@ mod tests {
                     faction: Some(FactionId(1)),
                     map_position: Vec2::new(0.0, 0.0),
                     static_objects: vec![],
+                    cluster_id: None,
+                    index_in_cluster: 0,
+                    cluster_sector_count: 1,
                 },
                 Sector {
                     id: b,
@@ -84,6 +92,9 @@ mod tests {
                     faction: Some(FactionId(2)),
                     map_position: Vec2::new(1.0, 0.5),
                     static_objects: vec![],
+                    cluster_id: None,
+                    index_in_cluster: 0,
+                    cluster_sector_count: 1,
                 },
             ],
             clusters: vec![],

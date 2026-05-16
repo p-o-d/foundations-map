@@ -1,8 +1,27 @@
 use egui::{Pos2, Rect, Response, Sense, Stroke, Vec2};
 use glam::Vec2 as GVec2;
-use map_domain::ids::{FactionId, SectorId};
+use map_domain::ids::{ClusterId, FactionId, SectorId};
 use map_domain::universe::{Universe, GateType};
 use crate::theme;
+
+/// Pixel-space layout offset for a sector inside its cluster.
+/// Scales with `r` (which the renderer derives from `hex_r`), so sectors never
+/// overlap at low zoom — unlike the previous map-unit offset that shrank with
+/// `hex_r`'s clamped minimum.
+fn hex_offset_pixels(index: u32, total: u32, r: f32) -> Vec2 {
+    match (total, index) {
+        (1, _) => Vec2::ZERO,
+        (2, 0) => Vec2::new(-r * 0.5, 0.0),
+        (2, 1) => Vec2::new( r * 0.5, 0.0),
+        (3, 0) => Vec2::new(0.0, -r * 0.6),
+        (3, 1) => Vec2::new(-r * 0.55, r * 0.4),
+        (3, 2) => Vec2::new( r * 0.55, r * 0.4),
+        (_, i) => {
+            let theta = i as f32 / total as f32 * std::f32::consts::TAU;
+            Vec2::new(r * theta.cos(), r * theta.sin())
+        }
+    }
+}
 
 fn faction_fill(id: FactionId) -> egui::Color32 {
     const PALETTE: &[(u8, u8, u8)] = &[
@@ -215,9 +234,17 @@ impl MapView {
         let clicked_pos     = response.clicked().then(|| response.interact_pointer_pos()).flatten();
         let dbl_clicked_pos = response.double_clicked().then(|| response.interact_pointer_pos()).flatten();
 
-        // Precompute sector screen positions for hit detection
+        // Compute sector screen positions: cluster_center projected + per-sector
+        // hex offset scaled by hex_r so sectors fit nicely inside the cluster hex
+        // at any zoom level.
+        let sector_layout_r = hex_r * 2.0;
         let sector_screens: Vec<(SectorId, Pos2)> = universe.sectors.iter()
-            .map(|s| (s.id, self.universe_to_screen(rect, s.map_position)))
+            .map(|s| {
+                let cluster_center = self.universe_to_screen(rect, s.map_position);
+                let offset = hex_offset_pixels(s.index_in_cluster, s.cluster_sector_count, sector_layout_r);
+                let pos = Pos2::new(cluster_center.x + offset.x, cluster_center.y + offset.y);
+                (s.id, pos)
+            })
             .collect();
 
         // Connections — routing computed in universe space (zoom-invariant)
@@ -232,14 +259,25 @@ impl MapView {
         let time = ui.input(|i| i.time) as f32;
         let mut needs_repaint = false;
 
+        // Map cluster_id → sector count so we can skip drawing the cluster hex
+        // for single-sector clusters (where it adds no info beyond the sector hex).
+        let mut cluster_sector_counts: std::collections::HashMap<ClusterId, u32> =
+            std::collections::HashMap::new();
+        for s in &universe.sectors {
+            if let Some(cid) = s.cluster_id {
+                cluster_sector_counts.insert(cid, s.cluster_sector_count);
+            }
+        }
+
         // Cluster background hexes — drawn before sectors so they sit behind.
-        // Now that sector positions are synthesized hexagonally within their cluster,
-        // a uniform-radius cluster hex correctly encloses them.
+        // Sector positions are laid out in pixel space at radius `sector_layout_r`
+        // from the cluster center, each with hex pixel radius `hex_r`, so the
+        // enclosing flat-top hex's inscribed radius covers `sector_layout_r + hex_r`.
         for cluster in &universe.clusters {
+            let count = cluster_sector_counts.get(&cluster.id).copied().unwrap_or(0);
+            if count < 2 { continue; }
             let center = self.universe_to_screen(rect, cluster.map_position);
-            // Encompass sector hexes (each hex_r pixels) at offset ≈ cluster.radius map units.
-            // Inscribed radius of flat-top hex covers cluster.radius*zoom + hex_r at narrow direction.
-            let r_pixels = (cluster.radius * self.zoom + hex_r) / 0.866 + 6.0;
+            let r_pixels = (sector_layout_r + hex_r) / 0.866 + 4.0;
             let pts: Vec<Pos2> = (0..6)
                 .map(|i| {
                     let a = std::f32::consts::FRAC_PI_3 * i as f32;
@@ -284,8 +322,10 @@ impl MapView {
                 conn.from.0,
                 conn.to.0,
             );
-            let fp = self.universe_to_screen(rect, from_s.map_position);
-            let tp = self.universe_to_screen(rect, to_s.map_position);
+            let fp = sector_screens.iter().find(|(id, _)| *id == conn.from).map(|(_, p)| *p)
+                .unwrap_or_else(|| self.universe_to_screen(rect, from_s.map_position));
+            let tp = sector_screens.iter().find(|(id, _)| *id == conn.to).map(|(_, p)| *p)
+                .unwrap_or_else(|| self.universe_to_screen(rect, to_s.map_position));
             let ctrl_screen = ctrl_u.map(|cu| self.universe_to_screen(rect, cu));
 
             match conn.gate_type {

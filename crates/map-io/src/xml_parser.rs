@@ -102,25 +102,29 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     // Sort sector macros per cluster for deterministic layout
     for v in cluster_to_sectors.values_mut() { v.sort(); }
 
+    // Sort cluster macros for stable ID assignment
+    let mut cluster_macros_sorted: Vec<String> = cluster_to_sectors.keys().cloned().collect();
+    cluster_macros_sorted.sort();
+
+    // Assign ClusterIds first so Sector entries can reference them.
+    let mut cluster_macro_to_id: HashMap<String, ClusterId> = HashMap::new();
+    for (i, cm) in cluster_macros_sorted.iter().enumerate() {
+        cluster_macro_to_id.insert(cm.clone(), ClusterId((i + 1) as u32));
+    }
+
     let mut sectors = Vec::new();
     let mut macro_to_id: HashMap<String, SectorId> = HashMap::new();
     let mut id_to_macro: HashMap<SectorId, String> = HashMap::new();
     let mut id_counter = 0u32;
-
-    // Sort cluster macros for stable ID assignment too
-    let mut cluster_macros_sorted: Vec<String> = cluster_to_sectors.keys().cloned().collect();
-    cluster_macros_sorted.sort();
 
     for cluster_macro in &cluster_macros_sorted {
         let (cx, cz) = cluster_positions.get(cluster_macro).copied().unwrap_or((0.0, 0.0));
         let cluster_center = Vec2::new(cx / 1_000_000.0, cz / 1_000_000.0);
         let sector_macros = &cluster_to_sectors[cluster_macro];
         let total = sector_macros.len();
+        let cluster_id = cluster_macro_to_id[cluster_macro];
 
         for (idx, sector_macro) in sector_macros.iter().enumerate() {
-            let offset = hex_layout_offset(idx, total);
-            let map_position = cluster_center + offset;
-
             let name = name_refs
                 .get(&sector_macro.to_lowercase())
                 .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))
@@ -139,18 +143,17 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                 id,
                 name,
                 faction: None,
-                map_position,
+                map_position: cluster_center,
                 static_objects: vec![],
+                cluster_id: Some(cluster_id),
+                index_in_cluster: idx as u32,
+                cluster_sector_count: total as u32,
             });
         }
     }
 
     let mut clusters: Vec<Cluster> = Vec::new();
-    let mut cluster_id_counter: u32 = 0;
     for cluster_macro in &cluster_macros_sorted {
-        let sector_macros = &cluster_to_sectors[cluster_macro];
-        // Skip single-sector clusters; they add no visual info beyond the sector hex itself.
-        if sector_macros.len() < 2 { continue; }
         let (cx, cz) = cluster_positions.get(cluster_macro).copied().unwrap_or((0.0, 0.0));
         let center = Vec2::new(cx / 1_000_000.0, cz / 1_000_000.0);
         let name = name_refs
@@ -158,13 +161,13 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))
             .cloned()
             .unwrap_or_else(|| macro_to_display_name(cluster_macro));
-        cluster_id_counter += 1;
+        let cluster_id = cluster_macro_to_id[cluster_macro];
         clusters.push(Cluster {
-            id: ClusterId(cluster_id_counter),
+            id: cluster_id,
             name,
             map_position: center,
-            // Encompass all synthetic sector offsets (max is R = 3.0 from helper); add margin.
-            radius: 3.0,
+            // Radius is unused now; renderer derives size from hex_r.
+            radius: 0.0,
         });
     }
     eprintln!("[map] Clusters built: {}", clusters.len());
@@ -1486,26 +1489,6 @@ fn macro_to_display_name(s: &str) -> String {
     s.trim_end_matches("_macro").replace('_', " ")
 }
 
-/// Synthetic hex offset (in map units) placing sectors hexagonally within their cluster.
-/// X4's clusters.xml gives sector offsets in megametres of in-game travel distance, which
-/// are useless for a visual map. The in-game galaxy map arranges sectors hexagonally inside
-/// each cluster regardless of their physical offsets — we mirror that.
-fn hex_layout_offset(index: usize, total: usize) -> Vec2 {
-    const R: f32 = 3.0;
-    match (total, index) {
-        (1, 0) => Vec2::new(0.0, 0.0),
-        (2, 0) => Vec2::new(-R * 0.5, 0.0),
-        (2, 1) => Vec2::new( R * 0.5, 0.0),
-        (3, 0) => Vec2::new(0.0, -R * 0.5),
-        (3, 1) => Vec2::new(-R * 0.5,  R * 0.4),
-        (3, 2) => Vec2::new( R * 0.5,  R * 0.4),
-        (_, i) => {
-            let theta = i as f32 / total as f32 * std::f32::consts::TAU;
-            Vec2::new(R * theta.cos(), R * theta.sin())
-        }
-    }
-}
-
 /// Parse a combined single-file galaxy XML (fixture format used in tests).
 ///
 /// All macros (`class="galaxy"`, `class="cluster"`, `class="sector"`) are in one
@@ -1714,6 +1697,9 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
             faction,
             map_position,
             static_objects: vec![],
+            cluster_id: None,
+            index_in_cluster: 0,
+            cluster_sector_count: 1,
         });
     }
 
