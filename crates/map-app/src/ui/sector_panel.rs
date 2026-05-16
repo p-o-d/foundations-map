@@ -49,6 +49,12 @@ impl SectorPanel {
 
         let mut object_clicked = None;
 
+        // Reserve space at the bottom for the "Open 3D View" button so it stays visible.
+        let scroll_height = (ui.available_height() - 44.0).max(80.0);
+        let scroll_resp = egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .max_height(scroll_height)
+            .show(ui, |ui| {
         if let ViewMode::SectorView { selected_obj, .. } = view_mode {
             ui.colored_label(theme::TEXT_MUTED, "OBJECTS");
             ui.add_space(4.0);
@@ -112,6 +118,8 @@ impl SectorPanel {
                 }
             }
         }
+            });
+        let _ = scroll_resp;
 
         ui.add_space(12.0);
         let open_clicked = ui.button("▣  Open 3D View").clicked();
