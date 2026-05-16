@@ -177,7 +177,8 @@ pub fn parse_save(
                             let z = attr_value(e, b"z")
                                 .and_then(|s| s.parse::<f32>().ok())
                                 .unwrap_or(0.0);
-                            p.position = Some(Vec3::new(x, y, z));
+                            // X4 stores positions in metres; convert to km to match static-object scale.
+                            p.position = Some(Vec3::new(x / 1000.0, y / 1000.0, z / 1000.0));
                         }
                     }
                 }

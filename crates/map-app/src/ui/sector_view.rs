@@ -22,6 +22,7 @@ impl SectorView3D {
         sector:       Option<&Sector>,
         camera:       &mut OrbitCamera,
         selected_obj: Option<ObjectId>,
+        world:        Option<&map_domain::world::World>,
     ) -> SectorViewResponse {
         let mut close_clicked  = false;
         let mut clicked_object = None;
@@ -112,6 +113,11 @@ impl SectorView3D {
 
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
         draw_axis_arrows(ui.painter(), view_rect, camera);
+
+        // Live entities from save snapshot (ships + stations) as screen-space markers.
+        if let (Some(sec), Some(world)) = (sector, world) {
+            draw_live_ships(ui.painter(), view_rect, camera, sec.id, world);
+        }
 
         // Border around canvas
         ui.painter().rect_stroke(canvas_rect, 2.0, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Outside);
@@ -360,4 +366,76 @@ fn draw_arrowhead(painter: &egui::Painter, tip: egui::Pos2, tail: egui::Pos2, co
         color,
         egui::Stroke::NONE,
     ));
+}
+
+fn faction_color(id: map_domain::ids::FactionId) -> egui::Color32 {
+    const PALETTE: &[(u8, u8, u8)] = &[
+        (59,  130, 246), (34, 197, 94), (168, 85, 247), (249, 115, 22),
+        (20,  184, 166), (239, 68, 68), (234, 179, 8), (236, 72, 153),
+    ];
+    let (r, g, b) = PALETTE[id.0 as usize % PALETTE.len()];
+    egui::Color32::from_rgba_unmultiplied(r, g, b, 230)
+}
+
+fn draw_live_ships(
+    painter: &egui::Painter,
+    view_rect: Rect,
+    camera: &OrbitCamera,
+    sector_id: map_domain::ids::SectorId,
+    world: &map_domain::world::World,
+) {
+    use map_domain::world::LiveObjectKind;
+    let aspect = view_rect.width() / view_rect.height().max(1.0);
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
+
+    let project = |world_pos: Vec3| -> Option<egui::Pos2> {
+        let clip = vp * world_pos.extend(1.0);
+        if clip.w <= 0.0 { return None; }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        Some(egui::Pos2::new(
+            (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
+        ))
+    };
+
+    for &eid in world.entities_in_sector(sector_id) {
+        let Some(&pos) = world.positions.get(&eid) else { continue };
+        let Some(screen) = project(pos) else { continue };
+        let kind = world.kinds.get(&eid);
+        let size = match kind {
+            Some(LiveObjectKind::ShipSmall)       => 4.0,
+            Some(LiveObjectKind::ShipMedium)      => 6.0,
+            Some(LiveObjectKind::ShipLarge)       => 10.0,
+            Some(LiveObjectKind::ShipExtraLarge)  => 14.0,
+            Some(LiveObjectKind::Station)         => 16.0,
+            None                                  => 4.0,
+        };
+        let color = world.factions.get(&eid)
+            .copied()
+            .map(faction_color)
+            .unwrap_or(egui::Color32::from_rgba_unmultiplied(200, 200, 200, 200));
+
+        match kind {
+            Some(LiveObjectKind::Station) => {
+                // Filled square
+                painter.rect_filled(
+                    egui::Rect::from_center_size(screen, egui::Vec2::splat(size)),
+                    0.0,
+                    color,
+                );
+            }
+            _ => {
+                // Equilateral triangle pointing up
+                let s = size;
+                let h = s * 0.866;
+                let pts = vec![
+                    egui::Pos2::new(screen.x, screen.y - h * 0.5),
+                    egui::Pos2::new(screen.x - s * 0.5, screen.y + h * 0.5),
+                    egui::Pos2::new(screen.x + s * 0.5, screen.y + h * 0.5),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+            }
+        }
+    }
 }

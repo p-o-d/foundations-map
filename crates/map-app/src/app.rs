@@ -134,7 +134,10 @@ impl eframe::App for App {
                 ViewMode::SectorView { sector, selected_obj } => {
                     // Compute positions before calling show to avoid double-borrow of self.universe
                     let sec = self.universe.sector(sector);
-                    let sv_resp = self.sector_view.show(ui, sec, &mut self.camera, selected_obj);
+                    let sv_resp = self.sector_view.show(
+                        ui, sec, &mut self.camera, selected_obj,
+                        self.snapshot.as_ref().map(|(_, w)| w),
+                    );
                     if sv_resp.close_clicked {
                         self.view_mode = self.view_mode.clone().close_sector_3d();
                     }
