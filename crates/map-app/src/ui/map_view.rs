@@ -1,9 +1,9 @@
+use crate::theme;
 use egui::{Pos2, Rect, Response, Sense, Stroke, Vec2};
 use glam::Vec2 as GVec2;
 use map_domain::ids::{ClusterId, FactionId, SectorId};
-use map_domain::universe::{Universe, GateType};
+use map_domain::universe::{GateType, Universe};
 use map_domain::world::World;
-use crate::theme;
 
 /// Pixel-space layout offset for a sector inside its cluster.
 /// Scales with `r` (which the renderer derives from `hex_r`), so sectors never
@@ -13,10 +13,10 @@ fn hex_offset_pixels(index: u32, total: u32, r: f32) -> Vec2 {
     match (total, index) {
         (1, _) => Vec2::ZERO,
         (2, 0) => Vec2::new(-r * 0.5, 0.0),
-        (2, 1) => Vec2::new( r * 0.5, 0.0),
+        (2, 1) => Vec2::new(r * 0.5, 0.0),
         (3, 0) => Vec2::new(0.0, -r * 0.6),
         (3, 1) => Vec2::new(-r * 0.55, r * 0.4),
-        (3, 2) => Vec2::new( r * 0.55, r * 0.4),
+        (3, 2) => Vec2::new(r * 0.55, r * 0.4),
         (_, i) => {
             let theta = i as f32 / total as f32 * std::f32::consts::TAU;
             Vec2::new(r * theta.cos(), r * theta.sin())
@@ -26,14 +26,14 @@ fn hex_offset_pixels(index: u32, total: u32, r: f32) -> Vec2 {
 
 fn faction_fill(id: FactionId) -> egui::Color32 {
     const PALETTE: &[(u8, u8, u8)] = &[
-        (59,  130, 246),  // blue
-        (34,  197, 94),   // green
-        (168, 85,  247),  // purple
-        (249, 115, 22),   // orange
-        (20,  184, 166),  // teal
-        (239, 68,  68),   // red
-        (234, 179, 8),    // yellow
-        (236, 72,  153),  // pink
+        (59, 130, 246), // blue
+        (34, 197, 94),  // green
+        (168, 85, 247), // purple
+        (249, 115, 22), // orange
+        (20, 184, 166), // teal
+        (239, 68, 68),  // red
+        (234, 179, 8),  // yellow
+        (236, 72, 153), // pink
     ];
     let (r, g, b) = PALETTE[id.0 as usize % PALETTE.len()];
     egui::Color32::from_rgba_unmultiplied(r, g, b, 60)
@@ -45,7 +45,7 @@ fn route_ctrl_point(
     from: GVec2,
     to: GVec2,
     obstacles: &[GVec2],
-    clearance: f32,  // universe units
+    clearance: f32, // universe units
     from_id: u32,
     to_id: u32,
 ) -> Option<GVec2> {
@@ -66,7 +66,11 @@ fn route_ctrl_point(
         };
         if dist_sq < clearance_sq {
             // Cross product z: positive = left of from→to
-            if line.x * ap.y - line.y * ap.x >= 0.0 { left += 1.0; } else { right += 1.0; }
+            if line.x * ap.y - line.y * ap.x >= 0.0 {
+                left += 1.0;
+            } else {
+                right += 1.0;
+            }
         }
     }
 
@@ -99,14 +103,16 @@ fn draw_connection(
             painter.line_segment([fp, tp], Stroke::new(width, color));
         }
         Some(ctrl) => {
-            let pts: Vec<Pos2> = (0..=12).map(|i| {
-                let t = i as f32 / 12.0;
-                let u = 1.0 - t;
-                Pos2::new(
-                    u * u * fp.x + 2.0 * u * t * ctrl.x + t * t * tp.x,
-                    u * u * fp.y + 2.0 * u * t * ctrl.y + t * t * tp.y,
-                )
-            }).collect();
+            let pts: Vec<Pos2> = (0..=12)
+                .map(|i| {
+                    let t = i as f32 / 12.0;
+                    let u = 1.0 - t;
+                    Pos2::new(
+                        u * u * fp.x + 2.0 * u * t * ctrl.x + t * t * tp.x,
+                        u * u * fp.y + 2.0 * u * t * ctrl.y + t * t * tp.y,
+                    )
+                })
+                .collect();
             painter.add(egui::Shape::line(pts, Stroke::new(width, color)));
         }
     }
@@ -121,9 +127,9 @@ fn draw_dotted_flow(
     time: f32,
 ) {
     const NUM_DASHES: usize = 18;
-    const DASH_LEN:   f32   = 0.025; // fraction of curve length
-    const STROKE_W:   f32   = 2.0;
-    const SPEED:      f32   = 0.05;
+    const DASH_LEN: f32 = 0.025; // fraction of curve length
+    const STROKE_W: f32 = 2.0;
+    const SPEED: f32 = 0.05;
 
     let sample = |t: f32| -> Pos2 {
         match ctrl_screen {
@@ -142,8 +148,12 @@ fn draw_dotted_flow(
         let t0 = ((i as f32 / NUM_DASHES as f32) + phase).rem_euclid(1.0);
         let t1 = (t0 + DASH_LEN).rem_euclid(1.0);
         // Skip dashes spanning the wrap-around or sitting on endpoints
-        if t1 < t0 { continue; }
-        if t0 < 0.04 || t1 > 0.96 { continue; }
+        if t1 < t0 {
+            continue;
+        }
+        if t0 < 0.04 || t1 > 0.96 {
+            continue;
+        }
         painter.line_segment([sample(t0), sample(t1)], Stroke::new(STROKE_W, color));
     }
 }
@@ -209,10 +219,7 @@ impl MapView {
         world: Option<&World>,
         selected: Option<SectorId>,
     ) -> MapViewResponse {
-        let (rect, response) = ui.allocate_exact_size(
-            ui.available_size(),
-            Sense::click_and_drag(),
-        );
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
 
         // Re-fit on first frame or when window grows
         let grew = rect.width() > self.last_rect_size.x + 2.0
@@ -233,17 +240,26 @@ impl MapView {
         let mut double_clicked_sector: Option<SectorId> = None;
         let hex_r = (self.zoom * 3.0).clamp(12.0, 80.0);
 
-        let clicked_pos     = response.clicked().then(|| response.interact_pointer_pos()).flatten();
-        let dbl_clicked_pos = response.double_clicked().then(|| response.interact_pointer_pos()).flatten();
+        let clicked_pos = response
+            .clicked()
+            .then(|| response.interact_pointer_pos())
+            .flatten();
+        let dbl_clicked_pos = response
+            .double_clicked()
+            .then(|| response.interact_pointer_pos())
+            .flatten();
 
         // Compute sector screen positions: cluster_center projected + per-sector
         // hex offset scaled by hex_r so sectors fit nicely inside the cluster hex
         // at any zoom level.
         let sector_layout_r = hex_r * 2.0;
-        let sector_screens: Vec<(SectorId, Pos2)> = universe.sectors.iter()
+        let sector_screens: Vec<(SectorId, Pos2)> = universe
+            .sectors
+            .iter()
             .map(|s| {
                 let cluster_center = self.universe_to_screen(rect, s.map_position);
-                let offset = hex_offset_pixels(s.index_in_cluster, s.cluster_sector_count, sector_layout_r);
+                let offset =
+                    hex_offset_pixels(s.index_in_cluster, s.cluster_sector_count, sector_layout_r);
                 let pos = Pos2::new(cluster_center.x + offset.x, cluster_center.y + offset.y);
                 (s.id, pos)
             })
@@ -253,7 +269,9 @@ impl MapView {
         let obstacle_clearance_u = 3.0_f32;
 
         use std::collections::HashSet;
-        let sh_pairs: HashSet<(SectorId, SectorId)> = universe.connections.iter()
+        let sh_pairs: HashSet<(SectorId, SectorId)> = universe
+            .connections
+            .iter()
             .filter(|c| matches!(c.gate_type, GateType::Superhighway))
             .map(|c| (c.from, c.to))
             .collect();
@@ -277,7 +295,9 @@ impl MapView {
         // enclosing flat-top hex's inscribed radius covers `sector_layout_r + hex_r`.
         for cluster in &universe.clusters {
             let count = cluster_sector_counts.get(&cluster.id).copied().unwrap_or(0);
-            if count < 2 { continue; }
+            if count < 2 {
+                continue;
+            }
             let center = self.universe_to_screen(rect, cluster.map_position);
             // 2-sector clusters are tighter (sectors at ±0.5*layout_r); shrink another 15%.
             let count_scale = if count == 2 { 0.85 } else { 1.0 };
@@ -291,7 +311,10 @@ impl MapView {
             painter.add(egui::Shape::convex_polygon(
                 pts,
                 egui::Color32::from_rgba_unmultiplied(60, 70, 110, 25),
-                Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 130, 170, 80)),
+                Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(120, 130, 170, 80),
+                ),
             ));
             painter.text(
                 Pos2::new(center.x, center.y - r_pixels - 4.0),
@@ -304,8 +327,10 @@ impl MapView {
 
         for conn in &universe.connections {
             let from_s = universe.sector(conn.from);
-            let to_s   = universe.sector(conn.to);
-            let (Some(from_s), Some(to_s)) = (from_s, to_s) else { continue };
+            let to_s = universe.sector(conn.to);
+            let (Some(from_s), Some(to_s)) = (from_s, to_s) else {
+                continue;
+            };
 
             let is_sh = matches!(conn.gate_type, GateType::Superhighway);
             let reverse_exists = is_sh && sh_pairs.contains(&(conn.to, conn.from));
@@ -314,7 +339,9 @@ impl MapView {
                 continue;
             }
 
-            let obstacles_u: Vec<GVec2> = universe.sectors.iter()
+            let obstacles_u: Vec<GVec2> = universe
+                .sectors
+                .iter()
                 .filter(|s| s.id != conn.from && s.id != conn.to)
                 .map(|s| s.map_position)
                 .collect();
@@ -326,15 +353,28 @@ impl MapView {
                 conn.from.0,
                 conn.to.0,
             );
-            let fp = sector_screens.iter().find(|(id, _)| *id == conn.from).map(|(_, p)| *p)
+            let fp = sector_screens
+                .iter()
+                .find(|(id, _)| *id == conn.from)
+                .map(|(_, p)| *p)
                 .unwrap_or_else(|| self.universe_to_screen(rect, from_s.map_position));
-            let tp = sector_screens.iter().find(|(id, _)| *id == conn.to).map(|(_, p)| *p)
+            let tp = sector_screens
+                .iter()
+                .find(|(id, _)| *id == conn.to)
+                .map(|(_, p)| *p)
                 .unwrap_or_else(|| self.universe_to_screen(rect, to_s.map_position));
             let ctrl_screen = ctrl_u.map(|cu| self.universe_to_screen(rect, cu));
 
             match conn.gate_type {
                 GateType::Standard => {
-                    draw_connection(&painter, fp, tp, ctrl_screen, egui::Color32::from_rgb(80, 95, 150), 1.0);
+                    draw_connection(
+                        &painter,
+                        fp,
+                        tp,
+                        ctrl_screen,
+                        egui::Color32::from_rgb(80, 95, 150),
+                        1.0,
+                    );
                 }
                 GateType::Superhighway if reverse_exists => {
                     draw_connection(&painter, fp, tp, ctrl_screen, theme::GATE_GREEN, 2.5);
@@ -353,7 +393,11 @@ impl MapView {
         for (sector, &(_, screen_pos)) in universe.sectors.iter().zip(sector_screens.iter()) {
             let is_selected = selected == Some(sector.id);
 
-            let border_color = if is_selected { theme::ACCENT } else { theme::BORDER };
+            let border_color = if is_selected {
+                theme::ACCENT
+            } else {
+                theme::BORDER
+            };
             let fill_color = if is_selected {
                 egui::Color32::from_rgba_unmultiplied(124, 58, 237, 80)
             } else if let Some(fid) = sector.faction {
@@ -367,7 +411,10 @@ impl MapView {
             let pts: Vec<Pos2> = (0..6)
                 .map(|i| {
                     let a = std::f32::consts::FRAC_PI_3 * i as f32;
-                    Pos2::new(screen_pos.x + hex_r * a.cos(), screen_pos.y + hex_r * a.sin())
+                    Pos2::new(
+                        screen_pos.x + hex_r * a.cos(),
+                        screen_pos.y + hex_r * a.sin(),
+                    )
                 })
                 .collect();
             painter.add(egui::Shape::convex_polygon(
@@ -381,7 +428,11 @@ impl MapView {
                 egui::Align2::CENTER_TOP,
                 &sector.name,
                 egui::FontId::proportional(9.0),
-                if is_selected { theme::ACCENT } else { theme::TEXT_PRIMARY },
+                if is_selected {
+                    theme::ACCENT
+                } else {
+                    theme::TEXT_PRIMARY
+                },
             );
 
             // Hit detection: circle around hex center
@@ -398,11 +449,18 @@ impl MapView {
             }
 
             // Ship-count badge (drawn on top of hex + name)
-            let count = world.map(|w| w.entities_in_sector(sector.id).len()).unwrap_or(0);
+            let count = world
+                .map(|w| w.entities_in_sector(sector.id).len())
+                .unwrap_or(0);
             if count > 0 {
-                let label = if count > 999 { format!("{}k", count / 1000) } else { count.to_string() };
+                let label = if count > 999 {
+                    format!("{}k", count / 1000)
+                } else {
+                    count.to_string()
+                };
                 let font = egui::FontId::proportional(9.0);
-                let galley = painter.layout_no_wrap(label.clone(), font.clone(), egui::Color32::WHITE);
+                let galley =
+                    painter.layout_no_wrap(label.clone(), font.clone(), egui::Color32::WHITE);
                 let pad = egui::Vec2::new(4.0, 1.0);
                 let badge_size = galley.size() + pad * 2.0;
                 let badge_center = screen_pos + egui::Vec2::new(hex_r * 0.6, -hex_r * 0.6);
@@ -435,7 +493,11 @@ impl MapView {
             }
         }
 
-        MapViewResponse { clicked_sector, double_clicked_sector, response }
+        MapViewResponse {
+            clicked_sector,
+            double_clicked_sector,
+            response,
+        }
     }
 }
 
@@ -466,7 +528,13 @@ mod tests {
 
     #[test]
     fn universe_to_screen_applies_zoom() {
-        let mv = MapView { pan: Vec2::ZERO, zoom: 100.0, min_zoom: 1.0, fit_pending: false, last_rect_size: Vec2::ZERO };
+        let mv = MapView {
+            pan: Vec2::ZERO,
+            zoom: 100.0,
+            min_zoom: 1.0,
+            fit_pending: false,
+            last_rect_size: Vec2::ZERO,
+        };
         let rect = Rect::from_center_size(Pos2::new(400.0, 300.0), Vec2::new(800.0, 600.0));
         let screen = mv.universe_to_screen(rect, GVec2::new(1.0, 0.0));
         assert_eq!(screen.x, 500.0);
@@ -474,7 +542,13 @@ mod tests {
 
     #[test]
     fn universe_to_screen_applies_pan() {
-        let mv = MapView { pan: Vec2::new(50.0, -30.0), zoom: 80.0, min_zoom: 1.0, fit_pending: false, last_rect_size: Vec2::ZERO };
+        let mv = MapView {
+            pan: Vec2::new(50.0, -30.0),
+            zoom: 80.0,
+            min_zoom: 1.0,
+            fit_pending: false,
+            last_rect_size: Vec2::ZERO,
+        };
         let rect = Rect::from_center_size(Pos2::new(400.0, 300.0), Vec2::new(800.0, 600.0));
         let screen = mv.universe_to_screen(rect, GVec2::ZERO);
         assert_eq!(screen, Pos2::new(450.0, 270.0));

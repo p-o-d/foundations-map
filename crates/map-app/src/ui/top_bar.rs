@@ -6,7 +6,9 @@ pub struct TopBar {
 
 impl Default for TopBar {
     fn default() -> Self {
-        Self { search_text: String::new() }
+        Self {
+            search_text: String::new(),
+        }
     }
 }
 
@@ -34,7 +36,10 @@ impl TopBar {
 
             ui.add_space(8.0);
             let refresh_enabled = !loading;
-            if ui.add_enabled(refresh_enabled, egui::Button::new("Refresh")).clicked() {
+            if ui
+                .add_enabled(refresh_enabled, egui::Button::new("Refresh"))
+                .clicked()
+            {
                 resp.refresh_clicked = true;
             }
 
@@ -44,7 +49,11 @@ impl TopBar {
                 ui.add_space(4.0);
                 ui.colored_label(
                     crate::theme::ACCENT,
-                    if snapshot.is_some() { "Reloading save…" } else { "Loading save…" },
+                    if snapshot.is_some() {
+                        "Reloading save…"
+                    } else {
+                        "Loading save…"
+                    },
                 );
             } else if let Some(meta) = snapshot {
                 let version = if meta.game_version.is_empty() {
@@ -73,11 +82,11 @@ fn format_age(mtime: std::time::SystemTime) -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     match elapsed {
-        0..=4         => "just now".to_string(),
-        5..=59        => format!("{}s ago", elapsed),
-        60..=3599     => format!("{}m ago", elapsed / 60),
-        3600..=86399  => format!("{}h ago", elapsed / 3600),
-        _             => format!("{}d ago", elapsed / 86400),
+        0..=4 => "just now".to_string(),
+        5..=59 => format!("{}s ago", elapsed),
+        60..=3599 => format!("{}m ago", elapsed / 60),
+        3600..=86399 => format!("{}h ago", elapsed / 3600),
+        _ => format!("{}d ago", elapsed / 86400),
     }
 }
 

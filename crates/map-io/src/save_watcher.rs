@@ -21,10 +21,7 @@ pub enum WatcherEvent {
 /// handle. Send `WatcherEvent`s on `tx`. Filters to `.xml.gz` files; debounces by
 /// `DEBOUNCE`; emits the most recently modified `.xml.gz` in the directory after
 /// the quiet window.
-pub fn watch_save_dir(
-    dir: &Path,
-    tx: Sender<WatcherEvent>,
-) -> notify::Result<RecommendedWatcher> {
+pub fn watch_save_dir(dir: &Path, tx: Sender<WatcherEvent>) -> notify::Result<RecommendedWatcher> {
     let dir_owned = dir.to_path_buf();
     // notify::recommended_watcher takes a closure that runs on the watcher's thread.
     // Forward events into a second channel; a debounce thread consumes them.
@@ -78,7 +75,9 @@ fn latest_xml_gz(dir: &Path) -> Option<PathBuf> {
     for e in std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()) {
         let p = e.path();
         let name = p.file_name()?.to_str()?.to_string();
-        if !name.ends_with(".xml.gz") { continue; }
+        if !name.ends_with(".xml.gz") {
+            continue;
+        }
         let mtime = e
             .metadata()
             .ok()

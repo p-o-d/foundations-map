@@ -85,9 +85,9 @@ pub fn parse_save(
                     let build = attr_value(e, b"build").unwrap_or_default();
                     meta.game_version = match (ver.is_empty(), build.is_empty()) {
                         (false, false) => format!("{}.{}", ver, build),
-                        (false, true)  => ver,
-                        (true,  false) => build,
-                        _              => String::new(),
+                        (false, true) => ver,
+                        (true, false) => build,
+                        _ => String::new(),
                     };
                 }
                 b"player" => {
@@ -347,11 +347,15 @@ mod tests {
         let (_, _, overrides) = parse_save(&fixture_path(), None).unwrap();
         assert_eq!(overrides.len(), 2);
         assert_eq!(
-            overrides.get("cluster_01_sector001_macro").map(|s| s.as_str()),
+            overrides
+                .get("cluster_01_sector001_macro")
+                .map(|s| s.as_str()),
             Some("argon")
         );
         assert_eq!(
-            overrides.get("cluster_06_sector001_macro").map(|s| s.as_str()),
+            overrides
+                .get("cluster_06_sector001_macro")
+                .map(|s| s.as_str()),
             Some("teladi")
         );
     }

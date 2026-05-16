@@ -1,6 +1,6 @@
-use glam::Vec2;
-use crate::ids::{SectorId, FactionId, ClusterId};
+use crate::ids::{ClusterId, FactionId, SectorId};
 use crate::objects::StaticObject;
+use glam::Vec2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GateType {

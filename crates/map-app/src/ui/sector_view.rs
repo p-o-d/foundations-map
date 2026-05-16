@@ -1,14 +1,14 @@
+use crate::renderer::camera::OrbitCamera;
+use crate::renderer::gpu::{DrawCall, MeshKind, SceneCallback};
+use crate::theme;
 use egui::{Pos2, Rect, Sense, Vec2};
 use glam::{Mat4, Vec3};
 use map_domain::ids::ObjectId;
 use map_domain::objects::StaticObjectKind;
 use map_domain::universe::Sector;
-use crate::renderer::camera::OrbitCamera;
-use crate::renderer::gpu::{DrawCall, MeshKind, SceneCallback};
-use crate::theme;
 
 pub struct SectorViewResponse {
-    pub close_clicked:  bool,
+    pub close_clicked: bool,
     pub clicked_object: Option<ObjectId>,
 }
 
@@ -18,17 +18,17 @@ pub struct SectorView3D;
 impl SectorView3D {
     pub fn show(
         &mut self,
-        ui:           &mut egui::Ui,
-        sector:       Option<&Sector>,
-        camera:       &mut OrbitCamera,
+        ui: &mut egui::Ui,
+        sector: Option<&Sector>,
+        camera: &mut OrbitCamera,
         selected_obj: Option<ObjectId>,
-        world:        Option<&map_domain::world::World>,
+        world: Option<&map_domain::world::World>,
     ) -> SectorViewResponse {
-        let mut close_clicked  = false;
+        let mut close_clicked = false;
         let mut clicked_object = None;
 
         let available = ui.available_rect_before_wrap();
-        let canvas_w  = available.width() * 0.80;
+        let canvas_w = available.width() * 0.80;
         let canvas_rect = Rect::from_min_size(
             available.min + Vec2::new((available.width() - canvas_w) * 0.5, 0.0),
             Vec2::new(canvas_w, available.height()),
@@ -36,13 +36,14 @@ impl SectorView3D {
 
         // 30px header, remainder is 3D view
         let header_rect = Rect::from_min_size(canvas_rect.min, Vec2::new(canvas_w, 30.0));
-        let view_rect   = Rect::from_min_size(
+        let view_rect = Rect::from_min_size(
             canvas_rect.min + Vec2::new(0.0, 30.0),
             Vec2::new(canvas_w, available.height() - 30.0),
         );
 
         // Draw header background + label
-        ui.painter().rect_filled(header_rect, 0.0, egui::Color32::from_rgb(15, 18, 28));
+        ui.painter()
+            .rect_filled(header_rect, 0.0, egui::Color32::from_rgb(15, 18, 28));
         if let Some(s) = sector {
             ui.painter().text(
                 header_rect.center(),
@@ -86,18 +87,23 @@ impl SectorView3D {
         }
 
         // Build draw calls (model matrix only; view/proj applied below)
-        let draw_calls_model = sector.map(|s| build_draw_calls(s, selected_obj)).unwrap_or_default();
+        let draw_calls_model = sector
+            .map(|s| build_draw_calls(s, selected_obj))
+            .unwrap_or_default();
 
         // Apply view + projection to get final MVP per draw call
         let aspect = view_rect.width() / view_rect.height().max(1.0);
-        let view   = camera.view_matrix();
-        let proj   = camera.proj_matrix(aspect);
-        let vp     = proj * view;
-        let draw_calls: Vec<DrawCall> = draw_calls_model.into_iter().map(|dc| DrawCall {
-            kind:  dc.kind,
-            mvp:   vp * dc.mvp,
-            color: dc.color,
-        }).collect();
+        let view = camera.view_matrix();
+        let proj = camera.proj_matrix(aspect);
+        let vp = proj * view;
+        let draw_calls: Vec<DrawCall> = draw_calls_model
+            .into_iter()
+            .map(|dc| DrawCall {
+                kind: dc.kind,
+                mvp: vp * dc.mvp,
+                color: dc.color,
+            })
+            .collect();
 
         // Push wgpu paint callback for the 3D view rect
         let cb = eframe::egui_wgpu::Callback::new_paint_callback(
@@ -120,81 +126,98 @@ impl SectorView3D {
         }
 
         // Border around canvas
-        ui.painter().rect_stroke(canvas_rect, 2.0, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Outside);
+        ui.painter().rect_stroke(
+            canvas_rect,
+            2.0,
+            egui::Stroke::new(1.0, theme::BORDER),
+            egui::StrokeKind::Outside,
+        );
 
-        SectorViewResponse { close_clicked, clicked_object }
+        SectorViewResponse {
+            close_clicked,
+            clicked_object,
+        }
     }
 }
 
 /// Build per-object draw calls with model matrix (translate + scale) and color.
 fn build_draw_calls(sector: &Sector, selected: Option<ObjectId>) -> Vec<DrawCall> {
-    sector.static_objects.iter()
+    sector
+        .static_objects
+        .iter()
         .filter(|obj| !matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway))
         .map(|obj| {
-        let scale = match obj.kind {
-            StaticObjectKind::Station      => 3.0,
-            StaticObjectKind::Gate         => 4.0,
-            StaticObjectKind::ResourceZone => 8.0,
-            StaticObjectKind::Anomaly      => 2.0,
-            StaticObjectKind::Highway      => 4.0,
-        };
-        let kind = match obj.kind {
-            StaticObjectKind::Station      => MeshKind::Box,
-            StaticObjectKind::Gate         => MeshKind::Ring,
-            StaticObjectKind::ResourceZone => MeshKind::Sphere,
-            StaticObjectKind::Anomaly      => MeshKind::Sphere,
-            StaticObjectKind::Highway      => MeshKind::Ring,
-        };
-        let color = if selected == Some(obj.id) {
-            [1.0, 0.8, 0.1, 1.0]  // yellow = selected
-        } else {
-            kind_color(&obj.kind)
-        };
-        let rotation = obj.rotation.map(|(pitch, yaw, roll)| {
-            Mat4::from_euler(
-                glam::EulerRot::YXZ,
-                yaw.to_radians(),
-                pitch.to_radians(),
-                roll.to_radians(),
-            )
-        }).unwrap_or(Mat4::IDENTITY);
-        let model = Mat4::from_translation(obj.position) * rotation * Mat4::from_scale(Vec3::splat(scale));
-        DrawCall { kind, mvp: model, color }
-    }).collect()
+            let scale = match obj.kind {
+                StaticObjectKind::Station => 3.0,
+                StaticObjectKind::Gate => 4.0,
+                StaticObjectKind::ResourceZone => 8.0,
+                StaticObjectKind::Anomaly => 2.0,
+                StaticObjectKind::Highway => 4.0,
+            };
+            let kind = match obj.kind {
+                StaticObjectKind::Station => MeshKind::Box,
+                StaticObjectKind::Gate => MeshKind::Ring,
+                StaticObjectKind::ResourceZone => MeshKind::Sphere,
+                StaticObjectKind::Anomaly => MeshKind::Sphere,
+                StaticObjectKind::Highway => MeshKind::Ring,
+            };
+            let color = if selected == Some(obj.id) {
+                [1.0, 0.8, 0.1, 1.0] // yellow = selected
+            } else {
+                kind_color(&obj.kind)
+            };
+            let rotation = obj
+                .rotation
+                .map(|(pitch, yaw, roll)| {
+                    Mat4::from_euler(
+                        glam::EulerRot::YXZ,
+                        yaw.to_radians(),
+                        pitch.to_radians(),
+                        roll.to_radians(),
+                    )
+                })
+                .unwrap_or(Mat4::IDENTITY);
+            let model = Mat4::from_translation(obj.position)
+                * rotation
+                * Mat4::from_scale(Vec3::splat(scale));
+            DrawCall {
+                kind,
+                mvp: model,
+                color,
+            }
+        })
+        .collect()
 }
 
 fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
     match kind {
-        StaticObjectKind::Station      => [0.4, 0.6, 1.0, 1.0],
-        StaticObjectKind::Gate         => [0.2, 0.9, 0.4, 1.0],
+        StaticObjectKind::Station => [0.4, 0.6, 1.0, 1.0],
+        StaticObjectKind::Gate => [0.2, 0.9, 0.4, 1.0],
         StaticObjectKind::ResourceZone => [0.5, 0.3, 0.9, 0.5],
-        StaticObjectKind::Anomaly      => [1.0, 0.4, 0.2, 1.0],
-        StaticObjectKind::Highway      => [0.3, 0.9, 0.5, 1.0],
+        StaticObjectKind::Anomaly => [1.0, 0.4, 0.2, 1.0],
+        StaticObjectKind::Highway => [0.3, 0.9, 0.5, 1.0],
     }
 }
 
 /// Project each object to screen space; return id of object nearest to click (within 20px).
-fn pick_object(
-    ptr:    Pos2,
-    rect:   Rect,
-    camera: &OrbitCamera,
-    sector: &Sector,
-) -> Option<ObjectId> {
+fn pick_object(ptr: Pos2, rect: Rect, camera: &OrbitCamera, sector: &Sector) -> Option<ObjectId> {
     let aspect = rect.width() / rect.height().max(1.0);
-    let vp     = camera.proj_matrix(aspect) * camera.view_matrix();
-    let mut best_id   = None;
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
+    let mut best_id = None;
     let mut best_dist = f32::MAX;
 
     for obj in &sector.static_objects {
         let clip = vp * obj.position.extend(1.0);
-        if clip.w <= 0.0 { continue; }
+        if clip.w <= 0.0 {
+            continue;
+        }
         let ndc = clip.truncate() / clip.w;
-        let sx  = (ndc.x * 0.5 + 0.5) * rect.width()  + rect.left();
-        let sy  = (1.0 - (ndc.y * 0.5 + 0.5)) * rect.height() + rect.top();
+        let sx = (ndc.x * 0.5 + 0.5) * rect.width() + rect.left();
+        let sy = (1.0 - (ndc.y * 0.5 + 0.5)) * rect.height() + rect.top();
         let dist = ((sx - ptr.x).powi(2) + (sy - ptr.y).powi(2)).sqrt();
         if dist < 20.0 && dist < best_dist {
             best_dist = dist;
-            best_id   = Some(obj.id);
+            best_id = Some(obj.id);
         }
     }
     best_id
@@ -204,41 +227,77 @@ fn pick_object(
 /// Arrow length scales with camera distance so they remain visible at all zoom levels.
 fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera) {
     let aspect = view_rect.width() / view_rect.height().max(1.0);
-    let vp  = camera.proj_matrix(aspect) * camera.view_matrix();
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
     let arm = camera.distance * 0.15;
 
     let center = Vec3::ZERO;
     let axes: &[(&str, Vec3, egui::Color32)] = &[
-        ("E",  center + Vec3::new( arm, 0.0,  0.0), egui::Color32::from_rgb(220,  80,  80)),
-        ("W",  center + Vec3::new(-arm, 0.0,  0.0), egui::Color32::from_rgb(160,  50,  50)),
-        ("Up", center + Vec3::new(0.0,  arm,  0.0), egui::Color32::from_rgb( 80, 220,  80)),
-        ("Dn", center + Vec3::new(0.0, -arm,  0.0), egui::Color32::from_rgb( 50, 130,  50)),
-        ("N",  center + Vec3::new(0.0, 0.0, -arm),  egui::Color32::from_rgb( 80, 180, 220)),
-        ("S",  center + Vec3::new(0.0, 0.0,  arm),  egui::Color32::from_rgb(220, 140,  50)),
+        (
+            "E",
+            center + Vec3::new(arm, 0.0, 0.0),
+            egui::Color32::from_rgb(220, 80, 80),
+        ),
+        (
+            "W",
+            center + Vec3::new(-arm, 0.0, 0.0),
+            egui::Color32::from_rgb(160, 50, 50),
+        ),
+        (
+            "Up",
+            center + Vec3::new(0.0, arm, 0.0),
+            egui::Color32::from_rgb(80, 220, 80),
+        ),
+        (
+            "Dn",
+            center + Vec3::new(0.0, -arm, 0.0),
+            egui::Color32::from_rgb(50, 130, 50),
+        ),
+        (
+            "N",
+            center + Vec3::new(0.0, 0.0, -arm),
+            egui::Color32::from_rgb(80, 180, 220),
+        ),
+        (
+            "S",
+            center + Vec3::new(0.0, 0.0, arm),
+            egui::Color32::from_rgb(220, 140, 50),
+        ),
     ];
 
     let project = |world: Vec3| -> Option<Pos2> {
         let clip = vp * world.extend(1.0);
-        if clip.w <= 0.0 { return None; }
+        if clip.w <= 0.0 {
+            return None;
+        }
         let ndc = clip.truncate() / clip.w;
-        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 {
+            return None;
+        }
         Some(Pos2::new(
-            (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
+            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
             (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
         ))
     };
 
-    let Some(origin) = project(center) else { return };
+    let Some(origin) = project(center) else {
+        return;
+    };
 
     for (label, end_world, color) in axes {
-        let Some(end) = project(*end_world) else { continue };
+        let Some(end) = project(*end_world) else {
+            continue;
+        };
         painter.line_segment([origin, end], egui::Stroke::new(2.0, *color));
 
         // Arrowhead triangle
-        let dir  = (end - origin).normalized();
+        let dir = (end - origin).normalized();
         let perp = Vec2::new(-dir.y, dir.x);
         painter.add(egui::Shape::convex_polygon(
-            vec![end, end - dir * 8.0 + perp * 4.0, end - dir * 8.0 - perp * 4.0],
+            vec![
+                end,
+                end - dir * 8.0 + perp * 4.0,
+                end - dir * 8.0 - perp * 4.0,
+            ],
             *color,
             egui::Stroke::NONE,
         ));
@@ -267,34 +326,45 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
 
     let project = |world: Vec3| -> Option<egui::Pos2> {
         let clip = vp * world.extend(1.0);
-        if clip.w <= 0.0 { return None; }
+        if clip.w <= 0.0 {
+            return None;
+        }
         let ndc = clip.truncate() / clip.w;
-        if ndc.x.abs() > 2.0 || ndc.y.abs() > 2.0 { return None; }
+        if ndc.x.abs() > 2.0 || ndc.y.abs() > 2.0 {
+            return None;
+        }
         Some(egui::Pos2::new(
-            (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
+            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
             (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
         ))
     };
 
-    let ring_color  = egui::Color32::from_rgba_premultiplied(100, 200, 255, 230);
+    let ring_color = egui::Color32::from_rgba_premultiplied(100, 200, 255, 230);
     let arrow_color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 230);
-    const RING_PX:  f32   = 9.0;
-    const ARROW_PX: f32   = 16.0;
+    const RING_PX: f32 = 9.0;
+    const ARROW_PX: f32 = 16.0;
     const SEGMENTS: usize = 32;
 
     for obj in &sector.static_objects {
-        if !matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway) { continue; }
+        if !matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway) {
+            continue;
+        }
 
         // Arrow direction: horizontal toward sector center (Y=0 plane).
         let mut dir = -obj.position;
         dir.y = 0.0;
-        if dir.length() < 0.001 { continue; }
+        if dir.length() < 0.001 {
+            continue;
+        }
         let dir = dir.normalize();
 
         let is_superhighway = matches!(obj.kind, StaticObjectKind::Highway);
         // Entry vs exit: check details for "Direction" key set to "Outbound" or fall back to name.
         let is_entry = is_superhighway
-            && obj.details.iter().any(|(k, v)| k == "Direction" && v == "Outbound");
+            && obj
+                .details
+                .iter()
+                .any(|(k, v)| k == "Direction" && v == "Outbound");
         // Pick colors per kind.
         let (this_ring_color, this_arrow_color) = if is_superhighway {
             (
@@ -308,12 +378,12 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
         // Distance from camera → world units per pixel for constant on-screen size.
         let dist = (obj.position - cam_eye).length();
         let world_per_px = dist * fov_factor / view_rect.height();
-        let radius    = RING_PX  * world_per_px;
+        let radius = RING_PX * world_per_px;
         let arrow_len = ARROW_PX * world_per_px;
 
         // Ring plane axes: perpendicular to `dir`. Up axis = Y; side axis = dir × Y.
         let axis_side = dir.cross(Vec3::Y).normalize();
-        let axis_up   = Vec3::Y;
+        let axis_up = Vec3::Y;
 
         // 32-segment polyline approximating the ring in 3D, projected to screen.
         let mut pts = Vec::with_capacity(SEGMENTS);
@@ -323,22 +393,37 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
             let p = obj.position + radius * (t.cos() * axis_side + t.sin() * axis_up);
             match project(p) {
                 Some(sp) => pts.push(sp),
-                None     => { all_ok = false; break; }
+                None => {
+                    all_ok = false;
+                    break;
+                }
             }
         }
-        if !all_ok { continue; }
+        if !all_ok {
+            continue;
+        }
         for i in 0..SEGMENTS {
-            painter.line_segment([pts[i], pts[(i + 1) % SEGMENTS]], egui::Stroke::new(1.5, this_ring_color));
+            painter.line_segment(
+                [pts[i], pts[(i + 1) % SEGMENTS]],
+                egui::Stroke::new(1.5, this_ring_color),
+            );
         }
 
         let center = Vec3::new(obj.position.x, 0.0, obj.position.z);
-        let Some(s_center) = project(center) else { continue };
+        let Some(s_center) = project(center) else {
+            continue;
+        };
         if is_superhighway {
             // Single arrow. Entry: outbound (center → outer). Exit: inbound (outer → center).
             // Outer point lies opposite to `dir` (which points toward origin), so center - dir * len.
             let outer = center - dir * arrow_len;
-            let Some(s_outer) = project(outer) else { continue };
-            painter.line_segment([s_center, s_outer], egui::Stroke::new(1.5, this_arrow_color));
+            let Some(s_outer) = project(outer) else {
+                continue;
+            };
+            painter.line_segment(
+                [s_center, s_outer],
+                egui::Stroke::new(1.5, this_arrow_color),
+            );
             if is_entry {
                 draw_arrowhead(painter, s_outer, s_center, this_arrow_color);
             } else {
@@ -346,23 +431,42 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
             }
         } else {
             // Bidirectional arrows for regular gates: one toward origin, one away.
-            let tip_inward  = center + dir * arrow_len;
+            let tip_inward = center + dir * arrow_len;
             let tip_outward = center - dir * arrow_len;
-            let Some(s_inward)  = project(tip_inward)  else { continue };
-            let Some(s_outward) = project(tip_outward) else { continue };
-            painter.line_segment([s_center, s_inward],  egui::Stroke::new(1.5, this_arrow_color));
-            painter.line_segment([s_center, s_outward], egui::Stroke::new(1.5, this_arrow_color));
-            draw_arrowhead(painter, s_inward,  s_center, this_arrow_color);
+            let Some(s_inward) = project(tip_inward) else {
+                continue;
+            };
+            let Some(s_outward) = project(tip_outward) else {
+                continue;
+            };
+            painter.line_segment(
+                [s_center, s_inward],
+                egui::Stroke::new(1.5, this_arrow_color),
+            );
+            painter.line_segment(
+                [s_center, s_outward],
+                egui::Stroke::new(1.5, this_arrow_color),
+            );
+            draw_arrowhead(painter, s_inward, s_center, this_arrow_color);
             draw_arrowhead(painter, s_outward, s_center, this_arrow_color);
         }
     }
 }
 
-fn draw_arrowhead(painter: &egui::Painter, tip: egui::Pos2, tail: egui::Pos2, color: egui::Color32) {
-    let dir  = (tip - tail).normalized();
+fn draw_arrowhead(
+    painter: &egui::Painter,
+    tip: egui::Pos2,
+    tail: egui::Pos2,
+    color: egui::Color32,
+) {
+    let dir = (tip - tail).normalized();
     let perp = egui::Vec2::new(-dir.y, dir.x);
     painter.add(egui::Shape::convex_polygon(
-        vec![tip, tip - dir * 8.0 + perp * 4.0, tip - dir * 8.0 - perp * 4.0],
+        vec![
+            tip,
+            tip - dir * 8.0 + perp * 4.0,
+            tip - dir * 8.0 - perp * 4.0,
+        ],
         color,
         egui::Stroke::NONE,
     ));
@@ -370,8 +474,14 @@ fn draw_arrowhead(painter: &egui::Painter, tip: egui::Pos2, tail: egui::Pos2, co
 
 fn faction_color(id: map_domain::ids::FactionId) -> egui::Color32 {
     const PALETTE: &[(u8, u8, u8)] = &[
-        (59,  130, 246), (34, 197, 94), (168, 85, 247), (249, 115, 22),
-        (20,  184, 166), (239, 68, 68), (234, 179, 8), (236, 72, 153),
+        (59, 130, 246),
+        (34, 197, 94),
+        (168, 85, 247),
+        (249, 115, 22),
+        (20, 184, 166),
+        (239, 68, 68),
+        (234, 179, 8),
+        (236, 72, 153),
     ];
     let (r, g, b) = PALETTE[id.0 as usize % PALETTE.len()];
     egui::Color32::from_rgba_unmultiplied(r, g, b, 230)
@@ -390,28 +500,36 @@ fn draw_live_ships(
 
     let project = |world_pos: Vec3| -> Option<egui::Pos2> {
         let clip = vp * world_pos.extend(1.0);
-        if clip.w <= 0.0 { return None; }
+        if clip.w <= 0.0 {
+            return None;
+        }
         let ndc = clip.truncate() / clip.w;
-        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 {
+            return None;
+        }
         Some(egui::Pos2::new(
-            (ndc.x * 0.5 + 0.5) * view_rect.width()  + view_rect.left(),
+            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
             (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
         ))
     };
 
     for &eid in world.entities_in_sector(sector_id) {
-        let Some(&pos) = world.positions.get(&eid) else { continue };
+        let Some(&pos) = world.positions.get(&eid) else {
+            continue;
+        };
         let Some(screen) = project(pos) else { continue };
         let kind = world.kinds.get(&eid);
         let size = match kind {
-            Some(LiveObjectKind::ShipSmall)       => 4.0,
-            Some(LiveObjectKind::ShipMedium)      => 6.0,
-            Some(LiveObjectKind::ShipLarge)       => 10.0,
-            Some(LiveObjectKind::ShipExtraLarge)  => 14.0,
-            Some(LiveObjectKind::Station)         => 16.0,
-            None                                  => 4.0,
+            Some(LiveObjectKind::ShipSmall) => 4.0,
+            Some(LiveObjectKind::ShipMedium) => 6.0,
+            Some(LiveObjectKind::ShipLarge) => 10.0,
+            Some(LiveObjectKind::ShipExtraLarge) => 14.0,
+            Some(LiveObjectKind::Station) => 16.0,
+            None => 4.0,
         };
-        let color = world.factions.get(&eid)
+        let color = world
+            .factions
+            .get(&eid)
             .copied()
             .map(faction_color)
             .unwrap_or(egui::Color32::from_rgba_unmultiplied(200, 200, 200, 200));

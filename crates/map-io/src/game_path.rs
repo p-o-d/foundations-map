@@ -16,10 +16,16 @@ fn detect_platform() -> Option<PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn linux_steam_paths() -> Vec<PathBuf> {
-    let Some(home) = std::env::var("HOME").ok() else { return vec![]; };
+    let Some(home) = std::env::var("HOME").ok() else {
+        return vec![];
+    };
     vec![
-        PathBuf::from(&home).join(".steam/steam/steamapps/common").join(GAME_DIR_NAME),
-        PathBuf::from(&home).join(".local/share/Steam/steamapps/common").join(GAME_DIR_NAME),
+        PathBuf::from(&home)
+            .join(".steam/steam/steamapps/common")
+            .join(GAME_DIR_NAME),
+        PathBuf::from(&home)
+            .join(".local/share/Steam/steamapps/common")
+            .join(GAME_DIR_NAME),
         PathBuf::from("/usr/share/Steam/steamapps/common").join(GAME_DIR_NAME),
     ]
 }
@@ -28,7 +34,9 @@ fn linux_steam_paths() -> Vec<PathBuf> {
 fn detect_platform() -> Option<PathBuf> {
     // Try Steam registry key first
     if let Some(path) = windows_registry_path() {
-        if path.exists() { return Some(path); }
+        if path.exists() {
+            return Some(path);
+        }
     }
     // Fallback: common Steam install locations
     for base in &[
@@ -36,19 +44,21 @@ fn detect_platform() -> Option<PathBuf> {
         r"C:\Program Files\Steam\steamapps\common",
     ] {
         let p = PathBuf::from(base).join(GAME_DIR_NAME);
-        if p.exists() { return Some(p); }
+        if p.exists() {
+            return Some(p);
+        }
     }
     None
 }
 
 #[cfg(target_os = "windows")]
 fn windows_registry_path() -> Option<PathBuf> {
-    use winreg::enums::*;
     use winreg::RegKey;
+    use winreg::enums::*;
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let key = hklm.open_subkey(
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 392160"
-    ).ok()?;
+    let key = hklm
+        .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 392160")
+        .ok()?;
     let install_location: String = key.get_value("InstallLocation").ok()?;
     Some(PathBuf::from(install_location))
 }
@@ -80,7 +90,11 @@ fn detect_locale_inner(game_dir: &Path) -> Option<u32> {
 
 fn find_steam_root(game_dir: &Path) -> Option<PathBuf> {
     // game_dir = <steam_root>/steamapps/common/X4 Foundations  (3 levels up)
-    if let Some(root) = game_dir.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+    if let Some(root) = game_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    {
         if root.join("userdata").exists() {
             return Some(root.to_path_buf());
         }
@@ -99,10 +113,7 @@ fn find_steam_root(game_dir: &Path) -> Option<PathBuf> {
         }
     }
     #[cfg(target_os = "windows")]
-    for candidate in &[
-        r"C:\Program Files (x86)\Steam",
-        r"C:\Program Files\Steam",
-    ] {
+    for candidate in &[r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"] {
         let p = PathBuf::from(candidate);
         if p.join("userdata").exists() {
             return Some(p);
@@ -166,23 +177,23 @@ fn extract_language_from_binary_vdf(data: &[u8]) -> Option<String> {
 
 fn steam_language_to_locale_id(lang: &str) -> u32 {
     match lang {
-        "english"    => 44,
-        "german"     => 49,
-        "french"     => 33,
-        "spanish"    => 34,
-        "italian"    => 39,
-        "russian"    => 7,
-        "czech"      => 42,
-        "polish"     => 48,
+        "english" => 44,
+        "german" => 49,
+        "french" => 33,
+        "spanish" => 34,
+        "italian" => 39,
+        "russian" => 7,
+        "czech" => 42,
+        "polish" => 48,
         "portuguese" | "brazilian" => 55,
-        "japanese"   => 81,
-        "koreana"    => 82,
-        "schinese"   => 86,
-        "tchinese"   => 88,
-        "turkish"    => 90,
-        "bulgarian"  => 359,
-        "ukrainian"  => 380,
-        _            => 44,
+        "japanese" => 81,
+        "koreana" => 82,
+        "schinese" => 86,
+        "tchinese" => 88,
+        "turkish" => 90,
+        "bulgarian" => 359,
+        "ukrainian" => 380,
+        _ => 44,
     }
 }
 

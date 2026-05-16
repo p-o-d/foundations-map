@@ -1,5 +1,5 @@
+use crate::ids::{FactionId, ObjectId};
 use glam::Vec3;
-use crate::ids::{ObjectId, FactionId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StaticObjectKind {

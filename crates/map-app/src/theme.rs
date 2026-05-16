@@ -1,16 +1,18 @@
 use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
-pub const BG_DARK: Color32      = Color32::from_rgb(10, 12, 18);
-pub const BG_PANEL: Color32     = Color32::from_rgb(20, 23, 33);
-pub const BG_WIDGET: Color32    = Color32::from_rgb(30, 34, 53);
-pub const ACCENT: Color32       = Color32::from_rgb(124, 58, 237);  // purple
-pub const ACCENT_DIM: Color32   = Color32::from_rgb(58, 63, 90);
+pub const BG_DARK: Color32 = Color32::from_rgb(10, 12, 18);
+pub const BG_PANEL: Color32 = Color32::from_rgb(20, 23, 33);
+pub const BG_WIDGET: Color32 = Color32::from_rgb(30, 34, 53);
+pub const ACCENT: Color32 = Color32::from_rgb(124, 58, 237); // purple
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(58, 63, 90);
 pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(224, 228, 240);
-pub const TEXT_MUTED: Color32   = Color32::from_rgb(122, 138, 180);
-pub const BORDER: Color32       = Color32::from_rgb(42, 45, 61);
-pub const GATE_GREEN: Color32   = Color32::from_rgb(42, 170, 106);
-pub const SHIP_YELLOW: Color32  = Color32::from_rgb(244, 180, 74);
-pub const HOSTILE_RED: Color32  = Color32::from_rgb(239, 68, 68);
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(122, 138, 180);
+pub const BORDER: Color32 = Color32::from_rgb(42, 45, 61);
+pub const GATE_GREEN: Color32 = Color32::from_rgb(42, 170, 106);
+#[allow(dead_code)]
+pub const SHIP_YELLOW: Color32 = Color32::from_rgb(244, 180, 74);
+#[allow(dead_code)]
+pub const HOSTILE_RED: Color32 = Color32::from_rgb(239, 68, 68);
 
 pub fn apply(ctx: &egui::Context) {
     let mut style = Style::default();

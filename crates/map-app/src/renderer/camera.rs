@@ -35,8 +35,7 @@ impl OrbitCamera {
 
     pub fn rotate(&mut self, dyaw: f32, dpitch: f32) {
         self.yaw += dyaw;
-        self.pitch = (self.pitch + dpitch)
-            .clamp(-85f32.to_radians(), 85f32.to_radians());
+        self.pitch = (self.pitch + dpitch).clamp(-85f32.to_radians(), 85f32.to_radians());
     }
 
     pub fn zoom(&mut self, delta: f32) {
@@ -49,10 +48,7 @@ impl OrbitCamera {
             self.distance = 100.0;
             return;
         }
-        let max_r = positions
-            .iter()
-            .map(|p| p.length())
-            .fold(0.0f32, f32::max);
+        let max_r = positions.iter().map(|p| p.length()).fold(0.0f32, f32::max);
         self.target = Vec3::ZERO;
         self.distance = ((max_r + 1.0) / 30f32.to_radians().tan()).max(10.0);
         self.yaw = 0.0;
@@ -70,7 +66,10 @@ mod tests {
         let cam = OrbitCamera::default();
         let eye = cam.eye();
         assert!(eye.y > 0.0, "eye must be above target");
-        assert!((eye - cam.target).length() > 0.0, "eye must not be at target");
+        assert!(
+            (eye - cam.target).length() > 0.0,
+            "eye must not be at target"
+        );
     }
 
     #[test]
@@ -78,7 +77,10 @@ mod tests {
         let cam = OrbitCamera::default();
         let view = cam.view_matrix();
         let t_view = view.transform_point3(cam.target);
-        assert!(t_view.z < 0.0, "target must be in front (negative z in RH view)");
+        assert!(
+            t_view.z < 0.0,
+            "target must be in front (negative z in RH view)"
+        );
     }
 
     #[test]
@@ -87,7 +89,10 @@ mod tests {
         let proj = cam.proj_matrix(16.0 / 9.0);
         // In glam's column-major perspective_rh, z_axis.w == -1.0 (the perspective divide term).
         // An orthographic matrix would have 0.0 there, so this confirms it's perspective.
-        assert!(proj.z_axis.w != 0.0, "projection must be perspective (non-zero z_axis.w)");
+        assert!(
+            proj.z_axis.w != 0.0,
+            "projection must be perspective (non-zero z_axis.w)"
+        );
     }
 
     #[test]
@@ -119,7 +124,10 @@ mod tests {
         let pts = vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(-10.0, 0.0, 0.0)];
         cam.fit_all(&pts);
         assert!((cam.target - Vec3::ZERO).length() < 1e-3);
-        assert!(cam.distance > 10.0, "must be far enough to see ±10 unit spread");
+        assert!(
+            cam.distance > 10.0,
+            "must be far enough to see ±10 unit spread"
+        );
     }
 
     #[test]

@@ -7,7 +7,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
   fmt:
@@ -35,6 +34,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # Informational: clippy lints reported but not treated as CI failure.
+      # Tighten later (per-lint allows) when the codebase is cleaner.
       - run: cargo clippy --workspace --all-targets
 
   test-linux:

@@ -1,5 +1,5 @@
-mod renderer;
 mod app;
+mod renderer;
 mod theme;
 pub mod ui;
 
@@ -81,7 +81,15 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Foundations Map",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, universe, snapshot_tx, snapshot_rx, watcher)))),
+        Box::new(move |cc| {
+            Ok(Box::new(app::App::new(
+                cc,
+                universe,
+                snapshot_tx,
+                snapshot_rx,
+                watcher,
+            )))
+        }),
     )
 }
 
@@ -125,7 +133,9 @@ fn candidate_save_dirs() -> Vec<std::path::PathBuf> {
 
     let mut out: Vec<std::path::PathBuf> = Vec::new();
     for root in roots {
-        let Ok(rd) = std::fs::read_dir(&root) else { continue };
+        let Ok(rd) = std::fs::read_dir(&root) else {
+            continue;
+        };
         for e in rd.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
             let save = e.path().join("save");
             if save.is_dir() {
@@ -139,13 +149,23 @@ fn candidate_save_dirs() -> Vec<std::path::PathBuf> {
 /// Pick the single newest `.xml.gz` across every candidate save dir. Returns
 /// `(save_file_path, containing_dir)` so the watcher can watch the active dir.
 fn find_latest_save() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
-    let mut best: Option<(std::time::SystemTime, std::path::PathBuf, std::path::PathBuf)> = None;
+    let mut best: Option<(
+        std::time::SystemTime,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    )> = None;
     for dir in candidate_save_dirs() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in rd.filter_map(|e| e.ok()) {
             let p = e.path();
-            let Some(name) = p.file_name().and_then(|n| n.to_str()) else { continue };
-            if !name.ends_with(".xml.gz") { continue; }
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.ends_with(".xml.gz") {
+                continue;
+            }
             let mtime = e
                 .metadata()
                 .ok()
@@ -163,9 +183,7 @@ fn find_latest_save() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
 /// produce a `SnapshotMessage`. Returns `None` if no save dir/file is present —
 /// callers map that to `SnapshotMessage::None`. Parser errors are mapped to
 /// `SnapshotMessage::Error`.
-pub fn parse_latest_save(
-    sector_macros: &HashMap<String, SectorId>,
-) -> Option<SnapshotMessage> {
+pub fn parse_latest_save(sector_macros: &HashMap<String, SectorId>) -> Option<SnapshotMessage> {
     let (path, _dir) = find_latest_save()?;
     eprintln!("[map] Loading save: {:?}", path);
     match map_io::save_parser::parse_save(&path, Some(sector_macros)) {
@@ -174,8 +192,15 @@ pub fn parse_latest_save(
                 "[map] Snapshot: time={:.1}s money={} location={}",
                 meta.game_time_seconds, meta.player_money, meta.player_location_name
             );
-            eprintln!("[map] Faction overrides: {} sectors", faction_overrides.len());
-            Some(SnapshotMessage::Loaded { meta, world, faction_overrides })
+            eprintln!(
+                "[map] Faction overrides: {} sectors",
+                faction_overrides.len()
+            );
+            Some(SnapshotMessage::Loaded {
+                meta,
+                world,
+                faction_overrides,
+            })
         }
         Err(e) => {
             eprintln!("[map] save_parser error: {:?}", e);
@@ -193,12 +218,16 @@ pub fn apply_faction_overrides(universe: &mut Universe, overrides: &FactionOverr
     let mut applied: usize = 0;
 
     for (macro_key, faction_name) in overrides.iter() {
-        let Some(&sector_id) = universe.sector_macros.get(macro_key) else { continue; };
-        let fid = *faction_name_to_id.entry(faction_name.clone()).or_insert_with(|| {
-            let id = FactionId(next_faction_id);
-            next_faction_id += 1;
-            id
-        });
+        let Some(&sector_id) = universe.sector_macros.get(macro_key) else {
+            continue;
+        };
+        let fid = *faction_name_to_id
+            .entry(faction_name.clone())
+            .or_insert_with(|| {
+                let id = FactionId(next_faction_id);
+                next_faction_id += 1;
+                id
+            });
         if let Some(sec) = universe.sectors.iter_mut().find(|s| s.id == sector_id) {
             sec.faction = Some(fid);
             applied += 1;

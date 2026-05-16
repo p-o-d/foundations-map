@@ -2,15 +2,15 @@
 // top-bar already shows that state and plumbing the snapshot through to the
 // panel just to repeat the message isn't worth the parameter churn. Revisit
 // if/when the panel grows live-data sections (per-sector ship list, etc.).
-use map_domain::ids::ObjectId;
-use map_domain::universe::{Sector, Universe, GateType};
-use map_domain::view::ViewMode;
 use crate::theme;
+use map_domain::ids::ObjectId;
+use map_domain::universe::{GateType, Sector, Universe};
+use map_domain::view::ViewMode;
 
 pub struct SectorPanelResponse {
-    pub open_3d_clicked:     bool,
+    pub open_3d_clicked: bool,
     pub back_to_map_clicked: bool,
-    pub object_clicked:      Option<ObjectId>,
+    pub object_clicked: Option<ObjectId>,
 }
 
 #[derive(Default)]
@@ -19,9 +19,9 @@ pub struct SectorPanel;
 impl SectorPanel {
     pub fn show(
         &mut self,
-        ui:        &mut egui::Ui,
-        sector:    Option<&Sector>,
-        universe:  &Universe,
+        ui: &mut egui::Ui,
+        sector: Option<&Sector>,
+        universe: &Universe,
         view_mode: &ViewMode,
     ) -> SectorPanelResponse {
         ui.add_space(8.0);
@@ -59,69 +59,85 @@ impl SectorPanel {
             .auto_shrink([false, false])
             .max_height(scroll_height)
             .show(ui, |ui| {
-        if let ViewMode::SectorView { selected_obj, .. } = view_mode {
-            ui.colored_label(theme::TEXT_MUTED, "OBJECTS");
-            ui.add_space(4.0);
-            if sector.static_objects.is_empty() {
-                ui.colored_label(theme::TEXT_MUTED, "None loaded");
-            }
-            for obj in &sector.static_objects {
-                let is_sel = *selected_obj == Some(obj.id);
-                let label = format!("{} {}", kind_icon(&obj.kind), &obj.name);
-                let color = if is_sel { theme::ACCENT } else { theme::TEXT_PRIMARY };
-                if ui.colored_label(color, &label).clicked() {
-                    object_clicked = Some(obj.id);
-                }
-            }
+                if let ViewMode::SectorView { selected_obj, .. } = view_mode {
+                    ui.colored_label(theme::TEXT_MUTED, "OBJECTS");
+                    ui.add_space(4.0);
+                    if sector.static_objects.is_empty() {
+                        ui.colored_label(theme::TEXT_MUTED, "None loaded");
+                    }
+                    for obj in &sector.static_objects {
+                        let is_sel = *selected_obj == Some(obj.id);
+                        let label = format!("{} {}", kind_icon(&obj.kind), &obj.name);
+                        let color = if is_sel {
+                            theme::ACCENT
+                        } else {
+                            theme::TEXT_PRIMARY
+                        };
+                        if ui.colored_label(color, &label).clicked() {
+                            object_clicked = Some(obj.id);
+                        }
+                    }
 
-            if let Some(obj) = selected_obj.and_then(|id| sector.static_objects.iter().find(|o| o.id == id)) {
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-                ui.colored_label(theme::TEXT_MUTED, "SELECTED");
-                ui.add_space(2.0);
-                ui.colored_label(theme::ACCENT, &obj.name);
-                ui.add_space(2.0);
-                ui.colored_label(theme::TEXT_MUTED, format!("Type: {}", kind_label(&obj.kind)));
-                ui.add_space(2.0);
-                ui.colored_label(theme::TEXT_MUTED, format!(
-                    "x {:.1}  y {:.1}  z {:.1} km",
-                    obj.position.x, obj.position.y, obj.position.z
-                ));
-                if let Some(f) = obj.faction {
-                    ui.colored_label(theme::TEXT_MUTED, format!("Faction #{}", f.0));
+                    if let Some(obj) = selected_obj
+                        .and_then(|id| sector.static_objects.iter().find(|o| o.id == id))
+                    {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+                        ui.colored_label(theme::TEXT_MUTED, "SELECTED");
+                        ui.add_space(2.0);
+                        ui.colored_label(theme::ACCENT, &obj.name);
+                        ui.add_space(2.0);
+                        ui.colored_label(
+                            theme::TEXT_MUTED,
+                            format!("Type: {}", kind_label(&obj.kind)),
+                        );
+                        ui.add_space(2.0);
+                        ui.colored_label(
+                            theme::TEXT_MUTED,
+                            format!(
+                                "x {:.1}  y {:.1}  z {:.1} km",
+                                obj.position.x, obj.position.y, obj.position.z
+                            ),
+                        );
+                        if let Some(f) = obj.faction {
+                            ui.colored_label(theme::TEXT_MUTED, format!("Faction #{}", f.0));
+                        }
+                        if let Some((pitch, yaw, roll)) = obj.rotation {
+                            ui.colored_label(
+                                theme::TEXT_MUTED,
+                                format!("pitch {:.1}°  yaw {:.1}°  roll {:.1}°", pitch, yaw, roll),
+                            );
+                        }
+                        for (k, v) in &obj.details {
+                            ui.colored_label(theme::TEXT_MUTED, format!("{}: {}", k, v));
+                        }
+                    }
+                } else {
+                    ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
+                    ui.add_space(4.0);
+                    let neighbours = universe.neighbour_ids(sector.id);
+                    let conns = universe.connections_for(sector.id);
+                    if neighbours.is_empty() {
+                        ui.colored_label(theme::TEXT_MUTED, "None");
+                    }
+                    for nb_id in &neighbours {
+                        if let Some(nb) = universe.sector(*nb_id) {
+                            let gate_type = conns
+                                .iter()
+                                .find(|c| c.from == *nb_id || c.to == *nb_id)
+                                .map(|c| &c.gate_type);
+                            let prefix = match gate_type {
+                                Some(GateType::Superhighway) => "⇒",
+                                _ => "→",
+                            };
+                            ui.colored_label(
+                                theme::TEXT_PRIMARY,
+                                format!("{} {}", prefix, nb.name),
+                            );
+                        }
+                    }
                 }
-                if let Some((pitch, yaw, roll)) = obj.rotation {
-                    ui.colored_label(theme::TEXT_MUTED, format!(
-                        "pitch {:.1}°  yaw {:.1}°  roll {:.1}°",
-                        pitch, yaw, roll
-                    ));
-                }
-                for (k, v) in &obj.details {
-                    ui.colored_label(theme::TEXT_MUTED, format!("{}: {}", k, v));
-                }
-            }
-        } else {
-            ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
-            ui.add_space(4.0);
-            let neighbours = universe.neighbour_ids(sector.id);
-            let conns = universe.connections_for(sector.id);
-            if neighbours.is_empty() {
-                ui.colored_label(theme::TEXT_MUTED, "None");
-            }
-            for nb_id in &neighbours {
-                if let Some(nb) = universe.sector(*nb_id) {
-                    let gate_type = conns.iter()
-                        .find(|c| c.from == *nb_id || c.to == *nb_id)
-                        .map(|c| &c.gate_type);
-                    let prefix = match gate_type {
-                        Some(GateType::Superhighway) => "⇒",
-                        _ => "→",
-                    };
-                    ui.colored_label(theme::TEXT_PRIMARY, format!("{} {}", prefix, nb.name));
-                }
-            }
-        }
             });
         let _ = scroll_resp;
 
@@ -139,22 +155,22 @@ impl SectorPanel {
 fn kind_icon(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
     use map_domain::objects::StaticObjectKind::*;
     match kind {
-        Station      => "◼",
-        Gate         => "◯",
+        Station => "◼",
+        Gate => "◯",
         ResourceZone => "◎",
-        Anomaly      => "✦",
-        Highway      => "⇒",
+        Anomaly => "✦",
+        Highway => "⇒",
     }
 }
 
 fn kind_label(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
     use map_domain::objects::StaticObjectKind::*;
     match kind {
-        Station      => "Station",
-        Gate         => "Gate",
+        Station => "Station",
+        Gate => "Gate",
         ResourceZone => "Resource zone",
-        Anomaly      => "Anomaly",
-        Highway      => "Highway",
+        Anomaly => "Anomaly",
+        Highway => "Highway",
     }
 }
 

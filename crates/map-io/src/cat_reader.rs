@@ -8,7 +8,9 @@ pub fn read_all_game_files(game_dir: &Path, internal_path: &str) -> Vec<Vec<u8>>
 
     for n in 1..=99u32 {
         let cat_path = game_dir.join(format!("{:02}.cat", n));
-        if !cat_path.exists() { break; }
+        if !cat_path.exists() {
+            break;
+        }
         let dat_path = game_dir.join(format!("{:02}.dat", n));
         if let Some(data) = search_cat(&cat_path, &dat_path, internal_path) {
             results.push(data);
@@ -24,7 +26,9 @@ pub fn read_all_game_files(game_dir: &Path, internal_path: &str) -> Vec<Vec<u8>>
     {
         for n in 1..=99u32 {
             let cat_path = ext_dir.join(format!("ext_{:02}.cat", n));
-            if !cat_path.exists() { break; }
+            if !cat_path.exists() {
+                break;
+            }
             let dat_path = ext_dir.join(format!("ext_{:02}.dat", n));
             if let Some(data) = search_cat(&cat_path, &dat_path, internal_path) {
                 results.push(data);
@@ -89,8 +93,8 @@ fn search_cat(cat_path: &Path, dat_path: &Path, target: &str) -> Option<Vec<u8>>
         // Lines that don't parse are skipped (bad/comment lines).
         let mut parts = line.rsplitn(3, ' ');
         let _hash = parts.next();
-        let _ts   = parts.next();
-        let rest  = match parts.next() {
+        let _ts = parts.next();
+        let rest = match parts.next() {
             Some(s) => s,
             None => continue,
         };
@@ -125,7 +129,9 @@ pub fn list_files_matching(game_dir: &Path, prefix: &str, suffix: &str) -> Vec<(
     let mut sources: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
     for n in 1..=99u32 {
         let cat = game_dir.join(format!("{:02}.cat", n));
-        if !cat.exists() { break; }
+        if !cat.exists() {
+            break;
+        }
         sources.push((cat, game_dir.join(format!("{:02}.dat", n))));
     }
     if let Ok(entries) = std::fs::read_dir(game_dir.join("extensions")) {
@@ -138,23 +144,31 @@ pub fn list_files_matching(game_dir: &Path, prefix: &str, suffix: &str) -> Vec<(
         for ext_dir in ext_dirs {
             for n in 1..=99u32 {
                 let cat = ext_dir.join(format!("ext_{:02}.cat", n));
-                if !cat.exists() { break; }
+                if !cat.exists() {
+                    break;
+                }
                 sources.push((cat, ext_dir.join(format!("ext_{:02}.dat", n))));
             }
         }
     }
     for (cat_path, dat_path) in &sources {
-        let Ok(content) = std::fs::read_to_string(cat_path) else { continue };
-        let Ok(mut dat) = std::fs::File::open(dat_path) else { continue };
+        let Ok(content) = std::fs::read_to_string(cat_path) else {
+            continue;
+        };
+        let Ok(mut dat) = std::fs::File::open(dat_path) else {
+            continue;
+        };
         let mut offset: u64 = 0;
         for line in content.lines() {
             let mut parts = line.rsplitn(3, ' ');
             let _hash = parts.next();
-            let _ts   = parts.next();
+            let _ts = parts.next();
             let Some(rest) = parts.next() else { continue };
             let Some(sep) = rest.rfind(' ') else { continue };
             let path = &rest[..sep];
-            let Ok(size) = rest[sep + 1..].parse::<u64>() else { continue };
+            let Ok(size) = rest[sep + 1..].parse::<u64>() else {
+                continue;
+            };
             if path.starts_with(prefix) && path.ends_with(suffix) {
                 use std::io::{Read, Seek, SeekFrom};
                 if dat.seek(SeekFrom::Start(offset)).is_ok() {

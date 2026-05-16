@@ -1,9 +1,14 @@
-use crate::ids::{SectorId, ObjectId};
+use crate::ids::{ObjectId, SectorId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewMode {
-    UniverseMap { selected: Option<SectorId> },
-    SectorView  { sector: SectorId, selected_obj: Option<ObjectId> },
+    UniverseMap {
+        selected: Option<SectorId>,
+    },
+    SectorView {
+        sector: SectorId,
+        selected_obj: Option<ObjectId>,
+    },
 }
 
 impl ViewMode {
@@ -13,43 +18,52 @@ impl ViewMode {
 
     pub fn select_sector(self, sector: SectorId) -> Self {
         match self {
-            ViewMode::UniverseMap { .. } => ViewMode::UniverseMap { selected: Some(sector) },
-            ViewMode::SectorView { .. } => ViewMode::UniverseMap { selected: Some(sector) },
+            ViewMode::UniverseMap { .. } => ViewMode::UniverseMap {
+                selected: Some(sector),
+            },
+            ViewMode::SectorView { .. } => ViewMode::UniverseMap {
+                selected: Some(sector),
+            },
         }
     }
 
     pub fn open_sector_3d(self) -> Self {
         match self {
-            ViewMode::UniverseMap { selected: Some(sector) } => {
-                ViewMode::SectorView { sector, selected_obj: None }
-            }
+            ViewMode::UniverseMap {
+                selected: Some(sector),
+            } => ViewMode::SectorView {
+                sector,
+                selected_obj: None,
+            },
             other => other, // no-op if no sector selected
         }
     }
 
     pub fn close_sector_3d(self) -> Self {
         match self {
-            ViewMode::SectorView { sector, .. } => {
-                ViewMode::UniverseMap { selected: Some(sector) }
-            }
+            ViewMode::SectorView { sector, .. } => ViewMode::UniverseMap {
+                selected: Some(sector),
+            },
             other => other,
         }
     }
 
     pub fn select_object(self, obj: ObjectId) -> Self {
         match self {
-            ViewMode::SectorView { sector, .. } => {
-                ViewMode::SectorView { sector, selected_obj: Some(obj) }
-            }
+            ViewMode::SectorView { sector, .. } => ViewMode::SectorView {
+                sector,
+                selected_obj: Some(obj),
+            },
             other => other,
         }
     }
 
     pub fn deselect_object(self) -> Self {
         match self {
-            ViewMode::SectorView { sector, .. } => {
-                ViewMode::SectorView { sector, selected_obj: None }
-            }
+            ViewMode::SectorView { sector, .. } => ViewMode::SectorView {
+                sector,
+                selected_obj: None,
+            },
             other => other,
         }
     }
@@ -68,13 +82,21 @@ mod tests {
 
     #[test]
     fn initial_state_is_universe_map_no_selection() {
-        assert_eq!(ViewMode::initial(), ViewMode::UniverseMap { selected: None });
+        assert_eq!(
+            ViewMode::initial(),
+            ViewMode::UniverseMap { selected: None }
+        );
     }
 
     #[test]
     fn select_sector_sets_selection() {
         let v = ViewMode::initial().select_sector(SectorId(1));
-        assert_eq!(v, ViewMode::UniverseMap { selected: Some(SectorId(1)) });
+        assert_eq!(
+            v,
+            ViewMode::UniverseMap {
+                selected: Some(SectorId(1))
+            }
+        );
     }
 
     #[test]
@@ -88,7 +110,13 @@ mod tests {
         let v = ViewMode::initial()
             .select_sector(SectorId(5))
             .open_sector_3d();
-        assert_eq!(v, ViewMode::SectorView { sector: SectorId(5), selected_obj: None });
+        assert_eq!(
+            v,
+            ViewMode::SectorView {
+                sector: SectorId(5),
+                selected_obj: None
+            }
+        );
     }
 
     #[test]
@@ -97,7 +125,12 @@ mod tests {
             .select_sector(SectorId(5))
             .open_sector_3d()
             .close_sector_3d();
-        assert_eq!(v, ViewMode::UniverseMap { selected: Some(SectorId(5)) });
+        assert_eq!(
+            v,
+            ViewMode::UniverseMap {
+                selected: Some(SectorId(5))
+            }
+        );
     }
 
     #[test]
@@ -106,7 +139,13 @@ mod tests {
             .select_sector(SectorId(5))
             .open_sector_3d()
             .select_object(ObjectId(42));
-        assert_eq!(v, ViewMode::SectorView { sector: SectorId(5), selected_obj: Some(ObjectId(42)) });
+        assert_eq!(
+            v,
+            ViewMode::SectorView {
+                sector: SectorId(5),
+                selected_obj: Some(ObjectId(42))
+            }
+        );
     }
 
     #[test]
@@ -116,15 +155,26 @@ mod tests {
             .open_sector_3d()
             .select_object(ObjectId(42))
             .deselect_object();
-        assert_eq!(v, ViewMode::SectorView { sector: SectorId(5), selected_obj: None });
+        assert_eq!(
+            v,
+            ViewMode::SectorView {
+                sector: SectorId(5),
+                selected_obj: None
+            }
+        );
     }
 
     #[test]
     fn selected_sector_accessible_from_both_modes() {
-        let map = ViewMode::UniverseMap { selected: Some(SectorId(3)) };
+        let map = ViewMode::UniverseMap {
+            selected: Some(SectorId(3)),
+        };
         assert_eq!(map.selected_sector(), Some(SectorId(3)));
 
-        let view = ViewMode::SectorView { sector: SectorId(3), selected_obj: None };
+        let view = ViewMode::SectorView {
+            sector: SectorId(3),
+            selected_obj: None,
+        };
         assert_eq!(view.selected_sector(), Some(SectorId(3)));
     }
 }

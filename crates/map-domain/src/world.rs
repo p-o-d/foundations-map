@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use crate::ids::{FactionId, SectorId};
 use glam::Vec3;
-use crate::ids::{SectorId, FactionId};
+use std::collections::HashMap;
 
 pub type EntityId = u32;
 
@@ -22,12 +22,12 @@ pub struct PositionUpdate {
 
 #[derive(Debug, Default)]
 pub struct World {
-    pub names:      HashMap<EntityId, String>,
-    pub positions:  HashMap<EntityId, Vec3>,
+    pub names: HashMap<EntityId, String>,
+    pub positions: HashMap<EntityId, Vec3>,
     pub velocities: HashMap<EntityId, Vec3>,
-    pub factions:   HashMap<EntityId, FactionId>,
-    pub kinds:      HashMap<EntityId, LiveObjectKind>,
-    pub sectors:    HashMap<EntityId, SectorId>,
+    pub factions: HashMap<EntityId, FactionId>,
+    pub kinds: HashMap<EntityId, LiveObjectKind>,
+    pub sectors: HashMap<EntityId, SectorId>,
     /// Denormalised: all entities currently in a sector. Kept in sync by update_positions.
     pub sector_idx: HashMap<SectorId, Vec<EntityId>>,
 }
@@ -57,7 +57,10 @@ impl World {
     }
 
     pub fn entities_in_sector(&self, sector: SectorId) -> &[EntityId] {
-        self.sector_idx.get(&sector).map(Vec::as_slice).unwrap_or(&[])
+        self.sector_idx
+            .get(&sector)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn update_positions(&mut self, updates: &[PositionUpdate]) {
@@ -73,7 +76,10 @@ impl World {
 
             self.positions.insert(upd.entity, upd.position);
             self.sectors.insert(upd.entity, upd.sector);
-            self.sector_idx.entry(upd.sector).or_default().push(upd.entity);
+            self.sector_idx
+                .entry(upd.sector)
+                .or_default()
+                .push(upd.entity);
         }
     }
 }
@@ -82,22 +88,38 @@ impl World {
 mod tests {
     use super::*;
 
-    fn sector_a() -> SectorId { SectorId(1) }
-    fn sector_b() -> SectorId { SectorId(2) }
+    fn sector_a() -> SectorId {
+        SectorId(1)
+    }
+    fn sector_b() -> SectorId {
+        SectorId(2)
+    }
 
     fn populated_world() -> World {
         let mut w = World::new();
         w.insert_entity(
-            1, "Fighter Alpha".into(), LiveObjectKind::ShipSmall,
-            Some(FactionId(1)), Vec3::new(100.0, 0.0, 200.0), sector_a(),
+            1,
+            "Fighter Alpha".into(),
+            LiveObjectKind::ShipSmall,
+            Some(FactionId(1)),
+            Vec3::new(100.0, 0.0, 200.0),
+            sector_a(),
         );
         w.insert_entity(
-            2, "Freighter Beta".into(), LiveObjectKind::ShipLarge,
-            Some(FactionId(1)), Vec3::new(-500.0, 100.0, 0.0), sector_a(),
+            2,
+            "Freighter Beta".into(),
+            LiveObjectKind::ShipLarge,
+            Some(FactionId(1)),
+            Vec3::new(-500.0, 100.0, 0.0),
+            sector_a(),
         );
         w.insert_entity(
-            3, "Xenon Scout".into(), LiveObjectKind::ShipSmall,
-            None, Vec3::new(0.0, 0.0, 0.0), sector_b(),
+            3,
+            "Xenon Scout".into(),
+            LiveObjectKind::ShipSmall,
+            None,
+            Vec3::new(0.0, 0.0, 0.0),
+            sector_b(),
         );
         w
     }

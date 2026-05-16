@@ -4,8 +4,8 @@ use std::io::BufReader;
 use std::path::Path;
 
 use glam::{Vec2, Vec3};
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use map_domain::ids::{ClusterId, FactionId, ObjectId, SectorId};
 use map_domain::objects::{StaticObject, StaticObjectKind};
@@ -52,15 +52,17 @@ fn attr_value(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> 
 /// - `t/0001-l{locale}.xml`              — translations for detected Steam language
 pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     let load = |path: &str| {
-        crate::cat_reader::read_game_file(game_dir, path)
-            .ok_or_else(|| ParseError::MissingAttribute(format!("{path} not found in cat archives")))
+        crate::cat_reader::read_game_file(game_dir, path).ok_or_else(|| {
+            ParseError::MissingAttribute(format!("{path} not found in cat archives"))
+        })
     };
 
     let translations_data = load("t/0001-l044.xml")?;
     let translations_str = String::from_utf8_lossy(&translations_data);
 
     // Scan all universe map XML files (main + every DLC) once.
-    let universe_files = crate::cat_reader::list_files_matching(game_dir, "maps/xu_ep2_universe/", ".xml");
+    let universe_files =
+        crate::cat_reader::list_files_matching(game_dir, "maps/xu_ep2_universe/", ".xml");
 
     let mut cluster_positions: HashMap<String, (f32, f32)> = HashMap::new();
     let mut sector_placements: HashMap<String, (String, f32, f32)> = HashMap::new();
@@ -85,7 +87,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             all_sectors_strs.push(s);
         }
     }
-    eprintln!("[map] Universe XML files: {} (galaxy/clusters/zones/sectors merged)", universe_files.len());
+    eprintln!(
+        "[map] Universe XML files: {} (galaxy/clusters/zones/sectors merged)",
+        universe_files.len()
+    );
 
     let mut name_refs = HashMap::new();
     for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/mapdefaults.xml") {
@@ -97,10 +102,15 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     // Group sectors by cluster
     let mut cluster_to_sectors: HashMap<String, Vec<String>> = HashMap::new();
     for (sector_macro, (cluster_macro, _, _)) in &sector_placements {
-        cluster_to_sectors.entry(cluster_macro.clone()).or_default().push(sector_macro.clone());
+        cluster_to_sectors
+            .entry(cluster_macro.clone())
+            .or_default()
+            .push(sector_macro.clone());
     }
     // Sort sector macros per cluster for deterministic layout
-    for v in cluster_to_sectors.values_mut() { v.sort(); }
+    for v in cluster_to_sectors.values_mut() {
+        v.sort();
+    }
 
     // Sort cluster macros for stable ID assignment
     let mut cluster_macros_sorted: Vec<String> = cluster_to_sectors.keys().cloned().collect();
@@ -118,7 +128,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     let mut id_counter = 0u32;
 
     for cluster_macro in &cluster_macros_sorted {
-        let (cx, cz) = cluster_positions.get(cluster_macro).copied().unwrap_or((0.0, 0.0));
+        let (cx, cz) = cluster_positions
+            .get(cluster_macro)
+            .copied()
+            .unwrap_or((0.0, 0.0));
         let cluster_center = Vec2::new(cx / 1_000_000.0, cz / 1_000_000.0);
         let sector_macros = &cluster_to_sectors[cluster_macro];
         let total = sector_macros.len();
@@ -154,7 +167,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
 
     let mut clusters: Vec<Cluster> = Vec::new();
     for cluster_macro in &cluster_macros_sorted {
-        let (cx, cz) = cluster_positions.get(cluster_macro).copied().unwrap_or((0.0, 0.0));
+        let (cx, cz) = cluster_positions
+            .get(cluster_macro)
+            .copied()
+            .unwrap_or((0.0, 0.0));
         let center = Vec2::new(cx / 1_000_000.0, cz / 1_000_000.0);
         let name = name_refs
             .get(&cluster_macro.to_lowercase())
@@ -181,7 +197,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         .filter_map(|(a, b)| {
             Some(Connection {
                 from: *macro_to_id.get(&a)?,
-                to:   *macro_to_id.get(&b)?,
+                to: *macro_to_id.get(&b)?,
                 gate_type: GateType::Standard,
             })
         })
@@ -190,10 +206,14 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     // Parse gate positions and populate sectors.
     // Keys from parse_gate_positions_xml come from zones.xml zone names; id_to_macro keys come
     // from clusters.xml. DLC sectors may differ in casing — normalise both to lowercase.
-    let mut gate_positions: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> = HashMap::new();
+    let mut gate_positions: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> =
+        HashMap::new();
     for zs in &all_zones_strs {
         for (k, v) in parse_gate_positions_xml(zs) {
-            gate_positions.entry(k.to_lowercase()).or_default().extend(v);
+            gate_positions
+                .entry(k.to_lowercase())
+                .or_default()
+                .extend(v);
         }
     }
     // cluster_num → first sector display name for that cluster, used to label gates.
@@ -206,7 +226,9 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                     .and_then(|s| s.strip_suffix("_macro"))
                     .and_then(|s| s.parse::<u32>().ok())
                 {
-                    cluster_num_to_name.entry(num).or_insert(sector.name.clone());
+                    cluster_num_to_name
+                        .entry(num)
+                        .or_insert(sector.name.clone());
                 }
             }
         }
@@ -214,7 +236,8 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
 
     let mut gate_obj_counter = 0u32;
     for sector in &mut sectors {
-        if let Some(gates) = id_to_macro.get(&sector.id)
+        if let Some(gates) = id_to_macro
+            .get(&sector.id)
             .and_then(|m| gate_positions.get(&m.to_lowercase()))
         {
             for (x, y, z, dest_name, rot) in gates {
@@ -227,13 +250,13 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                     .unwrap_or_else(|| dest_name.clone());
                 let dest_for_details = dest_cluster_name.unwrap_or_else(|| dest_name.clone());
                 sector.static_objects.push(StaticObject {
-                    id:       ObjectId(10_000 + gate_obj_counter),
-                    kind:     StaticObjectKind::Gate,
+                    id: ObjectId(10_000 + gate_obj_counter),
+                    kind: StaticObjectKind::Gate,
                     position: Vec3::new(*x, *y, *z),
-                    faction:  None,
-                    name:     gate_name,
+                    faction: None,
+                    name: gate_name,
                     rotation: Some(*rot),
-                    details:  vec![
+                    details: vec![
                         ("Type".to_string(), "Standard gate".to_string()),
                         ("Destination".to_string(), dest_for_details),
                     ],
@@ -244,27 +267,34 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     eprintln!("[map] Gate objects loaded: {}", gate_obj_counter);
 
     // Parse non-gate static objects (stations, resource zones, anomalies) from zones.xml.
-    let mut non_gate_objects: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> = HashMap::new();
+    let mut non_gate_objects: HashMap<
+        String,
+        Vec<(f32, f32, f32, StaticObjectKind, String, String)>,
+    > = HashMap::new();
     for zs in &all_zones_strs {
         for (k, v) in parse_non_gate_objects_xml(zs) {
-            non_gate_objects.entry(k.to_lowercase()).or_default().extend(v);
+            non_gate_objects
+                .entry(k.to_lowercase())
+                .or_default()
+                .extend(v);
         }
     }
     let mut non_gate_counter = 0u32;
     for sector in &mut sectors {
-        if let Some(objects) = id_to_macro.get(&sector.id)
+        if let Some(objects) = id_to_macro
+            .get(&sector.id)
             .and_then(|m| non_gate_objects.get(&m.to_lowercase()))
         {
             for (x, y, z, kind, name, macro_ref) in objects {
                 non_gate_counter += 1;
                 sector.static_objects.push(StaticObject {
-                    id:       ObjectId(20_000 + non_gate_counter),
-                    kind:     kind.clone(),
+                    id: ObjectId(20_000 + non_gate_counter),
+                    kind: kind.clone(),
                     position: Vec3::new(*x, *y, *z),
-                    faction:  None,
-                    name:     name.clone(),
+                    faction: None,
+                    name: name.clone(),
                     rotation: None,
-                    details:  vec![("Macro".to_string(), macro_ref.clone())],
+                    details: vec![("Macro".to_string(), macro_ref.clone())],
                 });
             }
         }
@@ -285,13 +315,13 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                 if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
                     god_counter += 1;
                     sector.static_objects.push(StaticObject {
-                        id:       ObjectId(30_000 + god_counter),
+                        id: ObjectId(30_000 + god_counter),
                         kind,
                         position: Vec3::new(x, y, z),
-                        faction:  None,
+                        faction: None,
                         name,
                         rotation: None,
-                        details:  vec![("Macro".to_string(), mac)],
+                        details: vec![("Macro".to_string(), mac)],
                     });
                 }
             }
@@ -308,10 +338,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                 if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
                     station_counter += 1;
                     sector.static_objects.push(StaticObject {
-                        id:       ObjectId(50_000 + station_counter),
-                        kind:     StaticObjectKind::Station,
+                        id: ObjectId(50_000 + station_counter),
+                        kind: StaticObjectKind::Station,
                         position: pos,
-                        faction:  None,
+                        faction: None,
                         name,
                         rotation: rot,
                         details,
@@ -331,31 +361,41 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     let mut sh_zone_info: HashMap<String, (ShRole, String)> = HashMap::new();
     for (from_sec, to_sec, entry_zone, exit_zone) in &sechighways {
         // Look up sector display names
-        let from_name = sector_macro_to_id.get(from_sec)
+        let from_name = sector_macro_to_id
+            .get(from_sec)
             .and_then(|id| sectors.iter().find(|s| s.id == *id))
             .map(|s| s.name.clone())
             .unwrap_or_else(|| from_sec.clone());
-        let to_name = sector_macro_to_id.get(to_sec)
+        let to_name = sector_macro_to_id
+            .get(to_sec)
             .and_then(|id| sectors.iter().find(|s| s.id == *id))
             .map(|s| s.name.clone())
             .unwrap_or_else(|| to_sec.clone());
         sh_zone_info.insert(entry_zone.clone(), (ShRole::Entry, to_name.clone()));
-        sh_zone_info.insert(exit_zone.clone(),  (ShRole::Exit,  from_name.clone()));
+        sh_zone_info.insert(exit_zone.clone(), (ShRole::Exit, from_name.clone()));
         // Add 2D map connection (one-way; existing model is undirected so use from→to)
-        if let (Some(&fid), Some(&tid)) = (sector_macro_to_id.get(from_sec), sector_macro_to_id.get(to_sec)) {
+        if let (Some(&fid), Some(&tid)) = (
+            sector_macro_to_id.get(from_sec),
+            sector_macro_to_id.get(to_sec),
+        ) {
             connections.push(Connection {
                 from: fid,
-                to:   tid,
+                to: tid,
                 gate_type: GateType::Superhighway,
             });
         }
     }
-    eprintln!("[map] Superhighway connections (sector pairs): {}", sechighways.len());
+    eprintln!(
+        "[map] Superhighway connections (sector pairs): {}",
+        sechighways.len()
+    );
 
     // Parse superhighway connection zones from sectors.xml (entry/exit points within sectors).
     let mut sh_counter = 0u32;
     for sectors_str in &all_sectors_strs {
-        for (sec_lower, x, y, z, fallback_name, zone_lower) in parse_superhighway_zones_xml(sectors_str) {
+        for (sec_lower, x, y, z, fallback_name, zone_lower) in
+            parse_superhighway_zones_xml(sectors_str)
+        {
             if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
                 if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
                     sh_counter += 1;
@@ -384,10 +424,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
                     // Silence unused warning when no extra mutation is needed.
                     let _ = &mut details;
                     sector.static_objects.push(StaticObject {
-                        id:       ObjectId(40_000 + sh_counter),
-                        kind:     StaticObjectKind::Highway,
+                        id: ObjectId(40_000 + sh_counter),
+                        kind: StaticObjectKind::Highway,
                         position: Vec3::new(x, y, z),
-                        faction:  None,
+                        faction: None,
                         name,
                         rotation: None,
                         details,
@@ -402,7 +442,12 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
-    Ok(Universe { sectors, clusters, connections, sector_macros })
+    Ok(Universe {
+        sectors,
+        clusters,
+        connections,
+        sector_macros,
+    })
 }
 
 /// galaxy.xml: cluster_macro_name → absolute (x, z) position in metres.
@@ -417,7 +462,7 @@ fn parse_cluster_positions_xml(xml: &str) -> Result<HashMap<String, (f32, f32)>,
 
     let mut positions: HashMap<String, (f32, f32)> = HashMap::new();
     let mut in_galaxy = false;
-    let mut in_conn = false;       // inside a <connection ref="clusters"> element
+    let mut in_conn = false; // inside a <connection ref="clusters"> element
     let mut in_offset = false;
     let mut conn_pos: (f32, f32) = (0.0, 0.0);
     let mut conn_cluster_ref: Option<String> = None;
@@ -581,9 +626,7 @@ fn parse_sector_placements_xml(
 /// mapdefaults.xml: sector_macro_name → (page_id, text_id) for name lookup.
 ///
 /// Each `<dataset macro="...">` may contain `<identification name="{pageId,textId}"/>`.
-fn parse_sector_name_refs_xml(
-    xml: &str,
-) -> Result<HashMap<String, (u32, u32)>, ParseError> {
+fn parse_sector_name_refs_xml(xml: &str) -> Result<HashMap<String, (u32, u32)>, ParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -595,23 +638,21 @@ fn parse_sector_name_refs_xml(
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
 
-            Event::Start(ref e) | Event::Empty(ref e) => {
-                match e.name().as_ref() {
-                    b"dataset" => {
-                        current_macro = attr_value(e, b"macro");
-                    }
-                    b"identification" => {
-                        if let (Some(macro_name), Some(name_attr)) =
-                            (&current_macro, attr_value(e, b"name"))
-                        {
-                            if let Some(ids) = parse_page_text_ref(&name_attr) {
-                                name_refs.insert(macro_name.to_lowercase(), ids);
-                            }
+            Event::Start(ref e) | Event::Empty(ref e) => match e.name().as_ref() {
+                b"dataset" => {
+                    current_macro = attr_value(e, b"macro");
+                }
+                b"identification" => {
+                    if let (Some(macro_name), Some(name_attr)) =
+                        (&current_macro, attr_value(e, b"name"))
+                    {
+                        if let Some(ids) = parse_page_text_ref(&name_attr) {
+                            name_refs.insert(macro_name.to_lowercase(), ids);
                         }
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
 
             Event::End(ref e) => {
                 if e.name().as_ref() == b"dataset" {
@@ -660,8 +701,8 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
             Event::Text(e) => {
                 if let (Some(page_id), Some(text_id)) = (current_page, current_text_id) {
                     let decoded = e.decode().unwrap_or_default();
-                    let content = quick_xml::escape::unescape(&decoded)
-                        .unwrap_or_else(|_| decoded.clone());
+                    let content =
+                        quick_xml::escape::unescape(&decoded).unwrap_or_else(|_| decoded.clone());
                     if let Some(name) = extract_last_parenthetical(&content) {
                         translations.insert((page_id, text_id), name);
                     }
@@ -698,7 +739,11 @@ fn extract_last_parenthetical(s: &str) -> Option<String> {
     let open = s.rfind('(')?;
     let close = s[open..].find(')')?;
     let name = s[open + 1..open + close].trim();
-    if name.is_empty() { None } else { Some(name.to_string()) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 /// zones.xml: return deduplicated (from_sector_macro, to_sector_macro) gate pairs.
@@ -713,7 +758,9 @@ fn parse_gate_connections_xml(
     // cluster_macro → first sector macro seen for that cluster
     let mut cluster_first: HashMap<String, String> = HashMap::new();
     for (sector, (cluster, ..)) in sector_placements {
-        cluster_first.entry(cluster.clone()).or_insert_with(|| sector.clone());
+        cluster_first
+            .entry(cluster.clone())
+            .or_insert_with(|| sector.clone());
     }
 
     // First pass: collect (source_sector, from_cluster_num, to_cluster_num)
@@ -758,7 +805,10 @@ fn parse_gate_connections_xml(
     // Build lookup: (from_n, to_n) → sectors that have a gate in that direction
     let mut gate_map: HashMap<(u32, u32), Vec<String>> = HashMap::new();
     for (sector, from_n, to_n) in &raw {
-        gate_map.entry((*from_n, *to_n)).or_default().push(sector.clone());
+        gate_map
+            .entry((*from_n, *to_n))
+            .or_default()
+            .push(sector.clone());
     }
 
     // Second pass: match each gate with its reverse to get exact sector pair
@@ -795,7 +845,9 @@ fn parse_gate_connections_xml(
 ///
 /// Gate connections are named `connection_ClusterGate{N}To{M}`.
 /// Their `<offset><position x y z />` is in metres; we divide by 1000 to get km.
-fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> {
+fn parse_gate_positions_xml(
+    xml: &str,
+) -> HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -835,15 +887,29 @@ fn parse_gate_positions_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, St
                 if in_offset {
                     match e.name().as_ref() {
                         b"position" => {
-                            gate_pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            gate_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            gate_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            gate_pos.0 = attr_value(e, b"x")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0.0);
+                            gate_pos.1 = attr_value(e, b"y")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0.0);
+                            gate_pos.2 = attr_value(e, b"z")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0.0);
                         }
                         b"quaternion" => {
-                            let qx: f32 = attr_value(e, b"qx").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            let qy: f32 = attr_value(e, b"qy").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            let qz: f32 = attr_value(e, b"qz").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                            let qw: f32 = attr_value(e, b"qw").and_then(|s| s.parse().ok()).unwrap_or(1.0);
+                            let qx: f32 = attr_value(e, b"qx")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0.0);
+                            let qy: f32 = attr_value(e, b"qy")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0.0);
+                            let qz: f32 = attr_value(e, b"qz")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0.0);
+                            let qw: f32 = attr_value(e, b"qw")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(1.0);
                             let q = glam::Quat::from_xyzw(qx, qy, qz, qw).normalize();
                             let (yaw, pitch, roll) = q.to_euler(glam::EulerRot::YXZ);
                             gate_rot = (pitch.to_degrees(), yaw.to_degrees(), roll.to_degrees());
@@ -926,9 +992,9 @@ fn parse_sechighway_connections_xml(xml: &str) -> Vec<(String, String, String, S
     let mut in_sh = false;
     let mut current_role: Option<ShRole> = None;
     let mut entry_sec: Option<String> = None;
-    let mut exit_sec:  Option<String> = None;
+    let mut exit_sec: Option<String> = None;
     let mut entry_zone: Option<String> = None;
-    let mut exit_zone:  Option<String> = None;
+    let mut exit_zone: Option<String> = None;
     let mut buf = Vec::new();
 
     loop {
@@ -940,13 +1006,13 @@ fn parse_sechighway_connections_xml(xml: &str) -> Vec<(String, String, String, S
                     if r == "sechighways" {
                         in_sh = true;
                         entry_sec = None;
-                        exit_sec  = None;
+                        exit_sec = None;
                         entry_zone = None;
-                        exit_zone  = None;
+                        exit_zone = None;
                     } else if in_sh {
                         current_role = match r.as_str() {
                             "entrypoint" => Some(ShRole::Entry),
-                            "exitpoint"  => Some(ShRole::Exit),
+                            "exitpoint" => Some(ShRole::Exit),
                             _ => None,
                         };
                     }
@@ -977,9 +1043,12 @@ fn parse_sechighway_connections_xml(xml: &str) -> Vec<(String, String, String, S
                     if current_role.is_some() {
                         current_role = None;
                     } else if in_sh {
-                        if let (Some(from), Some(to), Some(ez), Some(xz)) =
-                            (entry_sec.take(), exit_sec.take(), entry_zone.take(), exit_zone.take())
-                        {
+                        if let (Some(from), Some(to), Some(ez), Some(xz)) = (
+                            entry_sec.take(),
+                            exit_sec.take(),
+                            entry_zone.take(),
+                            exit_zone.take(),
+                        ) {
                             result.push((from, to, ez, xz));
                         }
                         in_sh = false;
@@ -992,7 +1061,6 @@ fn parse_sechighway_connections_xml(xml: &str) -> Vec<(String, String, String, S
     }
     result
 }
-
 
 /// sectors.xml: SHCon zones — superhighway entry/exit points within a sector.
 /// Returns (sector_macro_lower, x_km, y_km, z_km, display_name, zone_macro_lower).
@@ -1029,9 +1097,15 @@ fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String
             },
             Ok(Event::Empty(ref e)) => match e.name().as_ref() {
                 b"position" if in_offset => {
-                    pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    pos.0 = attr_value(e, b"x")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    pos.1 = attr_value(e, b"y")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    pos.2 = attr_value(e, b"z")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
                 }
                 b"macro" if in_conn => {
                     zone_macro = attr_value(e, b"ref");
@@ -1057,7 +1131,14 @@ fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String
                                 })
                                 .unwrap_or_else(|| "shcon".into());
                             let name = format!("Superhighway {}", shcon_label.to_uppercase());
-                            result.push((sec.clone(), pos.0 / 1000.0, pos.1 / 1000.0, pos.2 / 1000.0, name, zm_lower));
+                            result.push((
+                                sec.clone(),
+                                pos.0 / 1000.0,
+                                pos.1 / 1000.0,
+                                pos.2 / 1000.0,
+                                name,
+                                zm_lower,
+                            ));
                         }
                     }
                     in_conn = false;
@@ -1082,10 +1163,10 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
     reader.config_mut().trim_text(true);
 
     let mut result = Vec::new();
-    let mut in_obj    = false;
-    let mut loc_sec:  Option<String>         = None;
-    let mut obj_pos:  Option<(f32, f32, f32)> = None;
-    let mut obj_mac:  Option<String>          = None;
+    let mut in_obj = false;
+    let mut loc_sec: Option<String> = None;
+    let mut obj_pos: Option<(f32, f32, f32)> = None;
+    let mut obj_mac: Option<String> = None;
     let mut buf = Vec::new();
 
     loop {
@@ -1093,7 +1174,7 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
             Ok(Event::Eof) => break,
             Ok(Event::Start(ref e)) => {
                 if e.name().as_ref() == b"object" && attr_value(e, b"id").is_some() {
-                    in_obj  = true;
+                    in_obj = true;
                     loc_sec = None;
                     obj_pos = None;
                     obj_mac = None;
@@ -1110,9 +1191,15 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
                     };
                 }
                 b"position" => {
-                    let x: f32 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    let y: f32 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    let z: f32 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    let x: f32 = attr_value(e, b"x")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    let y: f32 = attr_value(e, b"y")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    let z: f32 = attr_value(e, b"z")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
                     obj_pos = Some((x / 1000.0, y / 1000.0, z / 1000.0));
                 }
                 b"object" => {
@@ -1151,7 +1238,13 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
 /// Only emits stations with a `<position>` (skips procedural stations).
 fn parse_god_stations_xml(
     xml: &str,
-) -> Vec<(String, Vec3, Option<(f32, f32, f32)>, String, Vec<(String, String)>)> {
+) -> Vec<(
+    String,
+    Vec3,
+    Option<(f32, f32, f32)>,
+    String,
+    Vec<(String, String)>,
+)> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -1159,17 +1252,17 @@ fn parse_god_stations_xml(
     // depth counter: 0 = not inside any <station>, 1 = inside outer station, >1 = nested
     let mut station_depth: u32 = 0;
     // Attrs/state captured for the current outer <station>.
-    let mut id_attr:    String = String::new();
-    let mut race_attr:  String = String::new();
+    let mut id_attr: String = String::new();
+    let mut race_attr: String = String::new();
     let mut owner_attr: String = String::new();
-    let mut type_attr:  String = String::new();
-    let mut enc_attr:   String = String::new();
-    let mut loc_sec:    Option<String> = None;
-    let mut pos:        Option<(f32, f32, f32)> = None;
-    let mut rot:        Option<(f32, f32, f32)> = None;
+    let mut type_attr: String = String::new();
+    let mut enc_attr: String = String::new();
+    let mut loc_sec: Option<String> = None;
+    let mut pos: Option<(f32, f32, f32)> = None;
+    let mut rot: Option<(f32, f32, f32)> = None;
     let mut in_quotas = false;
     let mut gamestart_attr: String = String::new();
-    let mut quota_faction:  String = String::new();
+    let mut quota_faction: String = String::new();
     let mut buf = Vec::new();
 
     let reset = |id_attr: &mut String,
@@ -1220,16 +1313,23 @@ fn parse_god_stations_xml(
                         if station_depth == 1 {
                             // outer station opening
                             reset(
-                                &mut id_attr, &mut race_attr, &mut owner_attr,
-                                &mut type_attr, &mut enc_attr, &mut loc_sec,
-                                &mut pos, &mut rot, &mut gamestart_attr, &mut quota_faction,
+                                &mut id_attr,
+                                &mut race_attr,
+                                &mut owner_attr,
+                                &mut type_attr,
+                                &mut enc_attr,
+                                &mut loc_sec,
+                                &mut pos,
+                                &mut rot,
+                                &mut gamestart_attr,
+                                &mut quota_faction,
                             );
-                            id_attr    = attr_value(e, b"id").unwrap_or_default();
-                            race_attr  = attr_value(e, b"race").unwrap_or_default();
+                            id_attr = attr_value(e, b"id").unwrap_or_default();
+                            race_attr = attr_value(e, b"race").unwrap_or_default();
                             owner_attr = attr_value(e, b"owner").unwrap_or_default();
-                            type_attr  = attr_value(e, b"type").unwrap_or_default();
-                            enc_attr   = attr_value(e, b"encyclopedia").unwrap_or_default();
-                            in_quotas  = false;
+                            type_attr = attr_value(e, b"type").unwrap_or_default();
+                            enc_attr = attr_value(e, b"encyclopedia").unwrap_or_default();
+                            in_quotas = false;
                         }
                     }
                     b"location" if station_depth == 1 => {
@@ -1239,12 +1339,19 @@ fn parse_god_stations_xml(
                         }
                     }
                     b"position" if station_depth == 1 => {
-                        let x: f32 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                        let y: f32 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                        let z: f32 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                        let yaw:   Option<f32> = attr_value(e, b"yaw").and_then(|s| s.parse().ok());
-                        let pitch: Option<f32> = attr_value(e, b"pitch").and_then(|s| s.parse().ok());
-                        let roll:  Option<f32> = attr_value(e, b"roll").and_then(|s| s.parse().ok());
+                        let x: f32 = attr_value(e, b"x")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0.0);
+                        let y: f32 = attr_value(e, b"y")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0.0);
+                        let z: f32 = attr_value(e, b"z")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0.0);
+                        let yaw: Option<f32> = attr_value(e, b"yaw").and_then(|s| s.parse().ok());
+                        let pitch: Option<f32> =
+                            attr_value(e, b"pitch").and_then(|s| s.parse().ok());
+                        let roll: Option<f32> = attr_value(e, b"roll").and_then(|s| s.parse().ok());
                         pos = Some((x / 1000.0, y / 1000.0, z / 1000.0));
                         let yy = yaw.unwrap_or(0.0);
                         let pp = pitch.unwrap_or(0.0);
@@ -1279,12 +1386,18 @@ fn parse_god_stations_xml(
                     }
                 }
                 b"position" if station_depth == 1 => {
-                    let x: f32 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    let y: f32 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    let z: f32 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    let yaw:   Option<f32> = attr_value(e, b"yaw").and_then(|s| s.parse().ok());
+                    let x: f32 = attr_value(e, b"x")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    let y: f32 = attr_value(e, b"y")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    let z: f32 = attr_value(e, b"z")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    let yaw: Option<f32> = attr_value(e, b"yaw").and_then(|s| s.parse().ok());
                     let pitch: Option<f32> = attr_value(e, b"pitch").and_then(|s| s.parse().ok());
-                    let roll:  Option<f32> = attr_value(e, b"roll").and_then(|s| s.parse().ok());
+                    let roll: Option<f32> = attr_value(e, b"roll").and_then(|s| s.parse().ok());
                     pos = Some((x / 1000.0, y / 1000.0, z / 1000.0));
                     let yy = yaw.unwrap_or(0.0);
                     let pp = pitch.unwrap_or(0.0);
@@ -1328,13 +1441,28 @@ fn parse_god_stations_xml(
                             };
 
                             let mut details: Vec<(String, String)> = Vec::new();
-                            if !id_attr.is_empty()    { details.push(("ID".to_string(),        id_attr.clone())); }
-                            if !race_attr.is_empty()  { details.push(("Race".to_string(),      race_attr.clone())); }
-                            if !owner_attr.is_empty() { details.push(("Owner".to_string(),     owner_attr.clone())); }
-                            if !type_attr.is_empty()  { details.push(("Type".to_string(),      type_attr.clone())); }
-                            if !enc_attr.is_empty()   { details.push(("Encyclopedia".to_string(), enc_attr.clone())); }
-                            if !gamestart_attr.is_empty() { details.push(("Gamestart".to_string(), gamestart_attr.clone())); }
-                            if !quota_faction.is_empty() && quota_faction != race_attr && quota_faction != owner_attr {
+                            if !id_attr.is_empty() {
+                                details.push(("ID".to_string(), id_attr.clone()));
+                            }
+                            if !race_attr.is_empty() {
+                                details.push(("Race".to_string(), race_attr.clone()));
+                            }
+                            if !owner_attr.is_empty() {
+                                details.push(("Owner".to_string(), owner_attr.clone()));
+                            }
+                            if !type_attr.is_empty() {
+                                details.push(("Type".to_string(), type_attr.clone()));
+                            }
+                            if !enc_attr.is_empty() {
+                                details.push(("Encyclopedia".to_string(), enc_attr.clone()));
+                            }
+                            if !gamestart_attr.is_empty() {
+                                details.push(("Gamestart".to_string(), gamestart_attr.clone()));
+                            }
+                            if !quota_faction.is_empty()
+                                && quota_faction != race_attr
+                                && quota_faction != owner_attr
+                            {
                                 details.push(("Quota faction".to_string(), quota_faction.clone()));
                             }
 
@@ -1366,7 +1494,9 @@ fn titlecase_simple(s: &str) -> String {
         .map(|seg| {
             let mut chars = seg.chars();
             match chars.next() {
-                Some(c) => c.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase(),
+                Some(c) => {
+                    c.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase()
+                }
                 None => String::new(),
             }
         })
@@ -1377,9 +1507,18 @@ fn titlecase_simple(s: &str) -> String {
 /// Classify a static object by its macro reference name.
 fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
     let lower = macro_ref.to_lowercase();
-    if lower.contains("station") || lower.contains("dock") || lower.contains("platform") || lower.contains("_hq") {
+    if lower.contains("station")
+        || lower.contains("dock")
+        || lower.contains("platform")
+        || lower.contains("_hq")
+    {
         StaticObjectKind::Station
-    } else if lower.contains("resource") || lower.contains("asteroid") || lower.contains("gas") || lower.contains("field") || lower.contains("debris") {
+    } else if lower.contains("resource")
+        || lower.contains("asteroid")
+        || lower.contains("gas")
+        || lower.contains("field")
+        || lower.contains("debris")
+    {
         StaticObjectKind::ResourceZone
     } else {
         StaticObjectKind::Anomaly
@@ -1388,11 +1527,14 @@ fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
 
 /// zones.xml: sector_macro_name → non-gate object positions (x, y, z in km, kind, display name, raw macro ref).
 /// Picks up `ref="object"` connections in zone macros and classifies by macro ref name.
-fn parse_non_gate_objects_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> {
+fn parse_non_gate_objects_xml(
+    xml: &str,
+) -> HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
-    let mut result: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> = HashMap::new();
+    let mut result: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> =
+        HashMap::new();
     let mut current_sector: Option<String> = None;
     let mut in_object_conn = false;
     let mut in_offset = false;
@@ -1412,9 +1554,10 @@ fn parse_non_gate_objects_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, 
                     }
                 }
                 b"connection" if current_sector.is_some() => {
-                    let conn_ref  = attr_value(e, b"ref").unwrap_or_default();
+                    let conn_ref = attr_value(e, b"ref").unwrap_or_default();
                     let conn_name = attr_value(e, b"name").unwrap_or_default();
-                    let is_gate = conn_ref == "gates" || parse_gate_cluster_nums(&conn_name).is_some();
+                    let is_gate =
+                        conn_ref == "gates" || parse_gate_cluster_nums(&conn_name).is_some();
                     if !is_gate && !conn_ref.ends_with("_gate") && !conn_ref.is_empty() {
                         in_object_conn = true;
                         obj_pos = (0.0, 0.0, 0.0);
@@ -1426,9 +1569,15 @@ fn parse_non_gate_objects_xml(xml: &str) -> HashMap<String, Vec<(f32, f32, f32, 
             },
             Ok(Event::Empty(ref e)) => match e.name().as_ref() {
                 b"position" if in_offset => {
-                    obj_pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    obj_pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    obj_pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    obj_pos.0 = attr_value(e, b"x")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    obj_pos.1 = attr_value(e, b"y")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    obj_pos.2 = attr_value(e, b"z")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
                 }
                 b"macro" if in_object_conn => {
                     obj_macro = attr_value(e, b"ref");
@@ -1539,23 +1688,17 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
             Event::Start(ref e) => {
                 let tag = e.name();
                 match tag.as_ref() {
-                    b"macro" => {
-                        match attr_value(e, b"class").as_deref() {
-                            Some("galaxy") => ctx = MacroCtx::Galaxy,
-                            Some("cluster") => {
-                                ctx = MacroCtx::Cluster(
-                                    attr_value(e, b"name").unwrap_or_default(),
-                                )
-                            }
-                            Some("sector") => {
-                                ctx = MacroCtx::Sector(
-                                    attr_value(e, b"name").unwrap_or_default(),
-                                )
-                            }
-                            Some(_) => ctx = MacroCtx::Other,
-                            None => {}
+                    b"macro" => match attr_value(e, b"class").as_deref() {
+                        Some("galaxy") => ctx = MacroCtx::Galaxy,
+                        Some("cluster") => {
+                            ctx = MacroCtx::Cluster(attr_value(e, b"name").unwrap_or_default())
                         }
-                    }
+                        Some("sector") => {
+                            ctx = MacroCtx::Sector(attr_value(e, b"name").unwrap_or_default())
+                        }
+                        Some(_) => ctx = MacroCtx::Other,
+                        None => {}
+                    },
                     b"connection" => {
                         if ctx == MacroCtx::Galaxy {
                             in_galaxy_conn = true;
@@ -1676,10 +1819,7 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
     let mut next_faction_id: u32 = 0;
 
     for (sector_macro, cluster_name) in &sector_to_cluster {
-        let (name, faction_str) = sector_props
-            .get(sector_macro)
-            .cloned()
-            .unwrap_or_default();
+        let (name, faction_str) = sector_props.get(sector_macro).cloned().unwrap_or_default();
 
         let (x, z) = cluster_positions
             .get(cluster_name)
@@ -1808,11 +1948,9 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
                         in_offset = false;
                     }
                     b"connection" if in_object_conn => {
-                        if let (Some(pos), Some(name), Some(kind)) = (
-                            pending_pos.take(),
-                            pending_name.take(),
-                            pending_kind.take(),
-                        ) {
+                        if let (Some(pos), Some(name), Some(kind)) =
+                            (pending_pos.take(), pending_name.take(), pending_kind.take())
+                        {
                             id_counter += 1;
                             let faction = pending_faction.take().map(|name| {
                                 *faction_ids.entry(name).or_insert_with(|| {

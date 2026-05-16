@@ -58,8 +58,5 @@ fn zone_name_to_sector_macro_extracts_correctly() {
         xml_parser::zone_name_to_sector_macro("Zone003_Cluster_01_Sector001_macro"),
         Some("Cluster_01_Sector001_macro".to_string()),
     );
-    assert_eq!(
-        xml_parser::zone_name_to_sector_macro("NotAZone"),
-        None,
-    );
+    assert_eq!(xml_parser::zone_name_to_sector_macro("NotAZone"), None,);
 }
