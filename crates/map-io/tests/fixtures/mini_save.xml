@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<savegame>
+  <info>
+    <save name="#test" date="1761750881"/>
+    <game version="800" build="580735" time="1734.285" start="x4ep1_gamestart_terran1"/>
+    <player name="Test" location="{20004,10011}" money="40000"/>
+  </info>
+  <universe>
+    <component class="galaxy" macro="xu_ep2_universe_macro">
+      <component class="cluster" macro="cluster_01_macro">
+        <component class="sector" macro="cluster_01_sector001_macro" owner="argon">
+          <component class="zone">
+            <component class="station" macro="station_arg_factory_01" owner="argon" id="[0x100]">
+              <offset><position x="0" y="0" z="0"/></offset>
+            </component>
+            <component class="ship_l" macro="ship_arg_l_destroyer_01" owner="argon" id="[0x101]">
+              <offset><position x="1000" y="0" z="2000"/></offset>
+            </component>
+          </component>
+        </component>
+      </component>
+      <component class="cluster" macro="cluster_06_macro">
+        <component class="sector" macro="cluster_06_sector001_macro" owner="teladi">
+          <component class="zone">
+            <component class="ship_s" macro="ship_tel_s_scout_01" owner="teladi" id="[0x102]">
+              <offset><position x="500" y="50" z="-500"/></offset>
+            </component>
+            <component class="ship_m" macro="ship_tel_m_frigate_01" owner="teladi" id="[0x103]">
+              <offset><position x="-200" y="0" z="100"/></offset>
+            </component>
+          </component>
+        </component>
+      </component>
+    </component>
+  </universe>
+</savegame>
