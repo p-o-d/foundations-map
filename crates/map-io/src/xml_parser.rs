@@ -645,7 +645,8 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     current_page = attr_value(e, b"id").and_then(|s| s.parse().ok());
                 }
                 b"t" => {
-                    if current_page == Some(20004) {
+                    // 20003 = cluster names, 20004 = sector names
+                    if matches!(current_page, Some(20003 | 20004)) {
                         current_text_id = attr_value(e, b"id").and_then(|s| s.parse().ok());
                     }
                 }
