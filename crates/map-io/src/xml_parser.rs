@@ -833,8 +833,8 @@ fn parse_sechighway_connections_xml(xml: &str) -> Vec<(String, String, String, S
             }
             Ok(Event::Empty(ref e)) => {
                 if in_sh && current_role.is_some() && e.name().as_ref() == b"macro" {
-                    if let Some(conn_attr) = attr_value(e, b"connection") {
-                        let zone_lower = conn_attr.to_lowercase();
+                    if let Some(ref_attr) = attr_value(e, b"ref") {
+                        let zone_lower = ref_attr.to_lowercase();
                         if let Some(sec) = shcon_zone_to_sector_macro_lower(&zone_lower) {
                             match current_role {
                                 Some(ShRole::Entry) => {
