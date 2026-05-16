@@ -232,17 +232,31 @@ impl MapView {
         let time = ui.input(|i| i.time) as f32;
         let mut needs_repaint = false;
 
-        // Cluster grouping — multi-sector clusters span large distances in X4 (sectors can be
-        // 100+ map units apart within the same cluster), so a single bounding hex makes no
-        // geometric sense. Render only a faint label at the cluster centroid.
+        // Cluster background hexes — drawn before sectors so they sit behind.
+        // Now that sector positions are synthesized hexagonally within their cluster,
+        // a uniform-radius cluster hex correctly encloses them.
         for cluster in &universe.clusters {
             let center = self.universe_to_screen(rect, cluster.map_position);
+            // Encompass sector hexes (each hex_r pixels) at offset ≈ cluster.radius map units.
+            // Inscribed radius of flat-top hex covers cluster.radius*zoom + hex_r at narrow direction.
+            let r_pixels = (cluster.radius * self.zoom + hex_r) / 0.866 + 6.0;
+            let pts: Vec<Pos2> = (0..6)
+                .map(|i| {
+                    let a = std::f32::consts::FRAC_PI_3 * i as f32;
+                    Pos2::new(center.x + r_pixels * a.cos(), center.y + r_pixels * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::convex_polygon(
+                pts,
+                egui::Color32::from_rgba_unmultiplied(60, 70, 110, 25),
+                Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 130, 170, 80)),
+            ));
             painter.text(
-                center,
-                egui::Align2::CENTER_CENTER,
+                Pos2::new(center.x, center.y - r_pixels - 4.0),
+                egui::Align2::CENTER_BOTTOM,
                 &cluster.name,
-                egui::FontId::proportional(11.0),
-                egui::Color32::from_rgba_unmultiplied(140, 150, 200, 180),
+                egui::FontId::proportional(10.0),
+                theme::TEXT_MUTED,
             );
         }
 
