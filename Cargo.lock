@@ -1757,6 +1757,7 @@ dependencies = [
 name = "map-io"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "glam",
  "map-domain",
  "quick-xml 0.40.0",
