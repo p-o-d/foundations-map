@@ -2,6 +2,7 @@ use egui::{Pos2, Rect, Response, Sense, Stroke, Vec2};
 use glam::Vec2 as GVec2;
 use map_domain::ids::{ClusterId, FactionId, SectorId};
 use map_domain::universe::{Universe, GateType};
+use map_domain::world::World;
 use crate::theme;
 
 /// Pixel-space layout offset for a sector inside its cluster.
@@ -205,6 +206,7 @@ impl MapView {
         &mut self,
         ui: &mut egui::Ui,
         universe: &Universe,
+        world: Option<&World>,
         selected: Option<SectorId>,
     ) -> MapViewResponse {
         let (rect, response) = ui.allocate_exact_size(
@@ -393,6 +395,24 @@ impl MapView {
                 if (ptr - screen_pos).length() < hit_r {
                     double_clicked_sector = Some(sector.id);
                 }
+            }
+
+            // Ship-count badge (drawn on top of hex + name)
+            let count = world.map(|w| w.entities_in_sector(sector.id).len()).unwrap_or(0);
+            if count > 0 {
+                let label = if count > 999 { format!("{}k", count / 1000) } else { count.to_string() };
+                let font = egui::FontId::proportional(9.0);
+                let galley = painter.layout_no_wrap(label.clone(), font.clone(), egui::Color32::WHITE);
+                let pad = egui::Vec2::new(4.0, 1.0);
+                let badge_size = galley.size() + pad * 2.0;
+                let badge_center = screen_pos + egui::Vec2::new(hex_r * 0.6, -hex_r * 0.6);
+                let badge_rect = egui::Rect::from_center_size(badge_center, badge_size);
+                painter.rect_filled(
+                    badge_rect,
+                    egui::CornerRadius::same(3),
+                    egui::Color32::from_rgba_unmultiplied(40, 50, 80, 220),
+                );
+                painter.galley(badge_rect.min + pad, galley, egui::Color32::WHITE);
             }
         }
 

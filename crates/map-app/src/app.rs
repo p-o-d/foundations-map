@@ -151,7 +151,12 @@ impl eframe::App for App {
                     }
                 }
                 ViewMode::UniverseMap { .. } => {
-                    let mvr = self.map_view.show(ui, &self.universe, selected);
+                    let mvr = self.map_view.show(
+                        ui,
+                        &self.universe,
+                        self.snapshot.as_ref().map(|(_, w)| w),
+                        selected,
+                    );
                     if let Some(sector_id) = mvr.double_clicked_sector {
                         let positions: Vec<_> = self.universe.sector(sector_id)
                             .map(|s| s.static_objects.iter().map(|o| o.position).collect())
