@@ -236,8 +236,11 @@ impl MapView {
         for cluster in &universe.clusters {
             let center = self.universe_to_screen(rect, cluster.map_position);
             // cluster.radius is max sector-to-centroid distance in map units.
-            // Add the sector hex pixel radius + margin so the cluster hex encloses sector hexes.
-            let r_pixels = cluster.radius * self.zoom + hex_r * 1.3 + 6.0;
+            // Cluster hex must enclose sector hexes whose own radius is hex_r pixels.
+            // Worst-case (sector aligned to inscribed-radius direction) needs the hex to be
+            // ~1/cos(30°) ≈ 1.155 larger than (offset + sector_hex_r). Use 1.3 for margin.
+            let raw = cluster.radius * self.zoom + hex_r;
+            let r_pixels = 1.3 * raw + 12.0;
             let pts: Vec<Pos2> = (0..6)
                 .map(|i| {
                     let a = std::f32::consts::FRAC_PI_3 * i as f32;
