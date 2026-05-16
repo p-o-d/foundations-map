@@ -277,7 +277,7 @@ impl MapView {
             let count = cluster_sector_counts.get(&cluster.id).copied().unwrap_or(0);
             if count < 2 { continue; }
             let center = self.universe_to_screen(rect, cluster.map_position);
-            let r_pixels = (sector_layout_r + hex_r) / 0.866 + 4.0;
+            let r_pixels = ((sector_layout_r + hex_r) / 0.866 + 4.0) * 0.8;
             let pts: Vec<Pos2> = (0..6)
                 .map(|i| {
                     let a = std::f32::consts::FRAC_PI_3 * i as f32;
