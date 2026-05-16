@@ -232,34 +232,17 @@ impl MapView {
         let time = ui.input(|i| i.time) as f32;
         let mut needs_repaint = false;
 
-        // Cluster background hexes — drawn before connections + sectors so they sit behind.
+        // Cluster grouping — multi-sector clusters span large distances in X4 (sectors can be
+        // 100+ map units apart within the same cluster), so a single bounding hex makes no
+        // geometric sense. Render only a faint label at the cluster centroid.
         for cluster in &universe.clusters {
             let center = self.universe_to_screen(rect, cluster.map_position);
-            // cluster.radius is max sector-to-centroid distance in map units.
-            // Cluster hex must enclose sector hexes whose own radius is hex_r pixels.
-            // Worst-case (sector aligned to inscribed-radius direction) needs the hex to be
-            // ~1/cos(30°) ≈ 1.155 larger than (offset + sector_hex_r). Use 1.3 for margin.
-            let raw = cluster.radius * self.zoom + hex_r;
-            let r_pixels = 1.3 * raw + 12.0;
-            let pts: Vec<Pos2> = (0..6)
-                .map(|i| {
-                    let a = std::f32::consts::FRAC_PI_3 * i as f32;
-                    Pos2::new(center.x + r_pixels * a.cos(), center.y + r_pixels * a.sin())
-                })
-                .collect();
-            // Faint fill, thin border
-            painter.add(egui::Shape::convex_polygon(
-                pts,
-                egui::Color32::from_rgba_unmultiplied(60, 70, 110, 25),
-                Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 130, 170, 80)),
-            ));
-            // Cluster name above the hex
             painter.text(
-                Pos2::new(center.x, center.y - r_pixels - 4.0),
-                egui::Align2::CENTER_BOTTOM,
+                center,
+                egui::Align2::CENTER_CENTER,
                 &cluster.name,
-                egui::FontId::proportional(10.0),
-                theme::TEXT_MUTED,
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_rgba_unmultiplied(140, 150, 200, 180),
             );
         }
 
