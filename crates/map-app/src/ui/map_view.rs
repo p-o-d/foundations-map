@@ -92,6 +92,41 @@ fn draw_connection(
     }
 }
 
+fn draw_dotted_flow(
+    painter: &egui::Painter,
+    fp: Pos2,
+    tp: Pos2,
+    ctrl_screen: Option<Pos2>,
+    color: egui::Color32,
+    time: f32,
+) {
+    const SAMPLES: usize = 80;
+    const NUM_DOTS: usize = 24;
+    const DOT_RADIUS: f32 = 2.0;
+    const SPEED: f32 = 0.10;
+
+    let sample = |t: f32| -> Pos2 {
+        match ctrl_screen {
+            None => Pos2::new(fp.x + (tp.x - fp.x) * t, fp.y + (tp.y - fp.y) * t),
+            Some(c) => {
+                let u = 1.0 - t;
+                Pos2::new(
+                    u * u * fp.x + 2.0 * u * t * c.x + t * t * tp.x,
+                    u * u * fp.y + 2.0 * u * t * c.y + t * t * tp.y,
+                )
+            }
+        }
+    };
+    let phase = (time * SPEED).rem_euclid(1.0);
+    for i in 0..NUM_DOTS {
+        let t = ((i as f32 / NUM_DOTS as f32) + phase).rem_euclid(1.0);
+        if t < 0.04 || t > 0.96 { continue; }
+        let p = sample(t);
+        painter.circle_filled(p, DOT_RADIUS, color);
+    }
+    let _ = SAMPLES;
+}
+
 pub struct MapView {
     pub pan: Vec2,
     pub zoom: f32,
@@ -185,32 +220,61 @@ impl MapView {
             .collect();
 
         // Connections — routing computed in universe space (zoom-invariant)
-        let obstacle_clearance_u = 3.0_f32; // universe units
+        let obstacle_clearance_u = 3.0_f32;
+
+        use std::collections::HashSet;
+        let sh_pairs: HashSet<(SectorId, SectorId)> = universe.connections.iter()
+            .filter(|c| matches!(c.gate_type, GateType::Superhighway))
+            .map(|c| (c.from, c.to))
+            .collect();
+
+        let time = ui.input(|i| i.time) as f32;
+        let mut needs_repaint = false;
+
         for conn in &universe.connections {
             let from_s = universe.sector(conn.from);
             let to_s   = universe.sector(conn.to);
-            if let (Some(from_s), Some(to_s)) = (from_s, to_s) {
-                let obstacles_u: Vec<GVec2> = universe.sectors.iter()
-                    .filter(|s| s.id != conn.from && s.id != conn.to)
-                    .map(|s| s.map_position)
-                    .collect();
-                let ctrl_u = route_ctrl_point(
-                    from_s.map_position,
-                    to_s.map_position,
-                    &obstacles_u,
-                    obstacle_clearance_u,
-                    conn.from.0,
-                    conn.to.0,
-                );
-                let fp = self.universe_to_screen(rect, from_s.map_position);
-                let tp = self.universe_to_screen(rect, to_s.map_position);
-                let ctrl_screen = ctrl_u.map(|cu| self.universe_to_screen(rect, cu));
-                let (color, width) = match conn.gate_type {
-                    GateType::Standard     => (egui::Color32::from_rgb(80, 95, 150), 1.0),
-                    GateType::Superhighway => (theme::GATE_GREEN, 2.5),
-                };
-                draw_connection(&painter, fp, tp, ctrl_screen, color, width);
+            let (Some(from_s), Some(to_s)) = (from_s, to_s) else { continue };
+
+            let is_sh = matches!(conn.gate_type, GateType::Superhighway);
+            let reverse_exists = is_sh && sh_pairs.contains(&(conn.to, conn.from));
+
+            if is_sh && reverse_exists && conn.from.0 > conn.to.0 {
+                continue;
             }
+
+            let obstacles_u: Vec<GVec2> = universe.sectors.iter()
+                .filter(|s| s.id != conn.from && s.id != conn.to)
+                .map(|s| s.map_position)
+                .collect();
+            let ctrl_u = route_ctrl_point(
+                from_s.map_position,
+                to_s.map_position,
+                &obstacles_u,
+                obstacle_clearance_u,
+                conn.from.0,
+                conn.to.0,
+            );
+            let fp = self.universe_to_screen(rect, from_s.map_position);
+            let tp = self.universe_to_screen(rect, to_s.map_position);
+            let ctrl_screen = ctrl_u.map(|cu| self.universe_to_screen(rect, cu));
+
+            match conn.gate_type {
+                GateType::Standard => {
+                    draw_connection(&painter, fp, tp, ctrl_screen, egui::Color32::from_rgb(80, 95, 150), 1.0);
+                }
+                GateType::Superhighway if reverse_exists => {
+                    draw_connection(&painter, fp, tp, ctrl_screen, theme::GATE_GREEN, 2.5);
+                }
+                GateType::Superhighway => {
+                    draw_dotted_flow(&painter, fp, tp, ctrl_screen, theme::GATE_GREEN, time);
+                    needs_repaint = true;
+                }
+            }
+        }
+
+        if needs_repaint {
+            ui.ctx().request_repaint();
         }
 
         for (sector, &(_, screen_pos)) in universe.sectors.iter().zip(sector_screens.iter()) {
