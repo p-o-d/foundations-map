@@ -387,6 +387,8 @@ fn parse_cluster_positions_xml(xml: &str) -> Result<HashMap<String, (f32, f32)>,
                         in_galaxy = true;
                     }
                 }
+                // DLC galaxy.xml uses <diff><add sel="..."> wrapper instead of <macro class="galaxy">.
+                b"diff" | b"add" => in_galaxy = true,
                 b"connection" if in_galaxy => {
                     if attr_value(e, b"ref").as_deref() == Some("clusters") {
                         in_conn = true;
