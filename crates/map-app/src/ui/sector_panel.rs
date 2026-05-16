@@ -87,6 +87,9 @@ impl SectorPanel {
                         pitch, yaw, roll
                     ));
                 }
+                for (k, v) in &obj.details {
+                    ui.colored_label(theme::TEXT_MUTED, format!("{}: {}", k, v));
+                }
             }
         } else {
             ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
