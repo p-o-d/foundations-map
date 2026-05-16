@@ -398,7 +398,11 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] Superhighway connections loaded: {}", sh_counter);
 
-    Ok(Universe { sectors, clusters, connections })
+    let sector_macros: HashMap<String, SectorId> = macro_to_id
+        .iter()
+        .map(|(k, v)| (k.to_lowercase(), *v))
+        .collect();
+    Ok(Universe { sectors, clusters, connections, sector_macros })
 }
 
 /// galaxy.xml: cluster_macro_name → absolute (x, z) position in metres.
@@ -1708,6 +1712,7 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         sectors,
         clusters: vec![],
         connections: vec![],
+        sector_macros: HashMap::new(),
     })
 }
 

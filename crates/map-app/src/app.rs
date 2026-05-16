@@ -1,14 +1,19 @@
+use std::sync::mpsc;
+
 use map_domain::universe::Universe;
 use map_domain::view::ViewMode;
 use map_domain::world::{SnapshotMeta, World};
 use crate::ui::{top_bar::TopBar, map_view::MapView, sector_panel::SectorPanel, sector_view::SectorView3D};
 use crate::renderer::camera::OrbitCamera;
+use crate::SnapshotMessage;
 
 pub struct App {
     pub universe:     Universe,
     pub view_mode:    ViewMode,
     pub camera:       OrbitCamera,
     pub snapshot:     Option<(SnapshotMeta, World)>,
+    pub snapshot_tx:  mpsc::Sender<SnapshotMessage>,
+    pub snapshot_rx:  mpsc::Receiver<SnapshotMessage>,
     top_bar:          TopBar,
     map_view:         MapView,
     sector_panel:     SectorPanel,
@@ -19,7 +24,8 @@ impl App {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         universe: Universe,
-        snapshot: Option<(SnapshotMeta, World)>,
+        snapshot_tx: mpsc::Sender<SnapshotMessage>,
+        snapshot_rx: mpsc::Receiver<SnapshotMessage>,
     ) -> Self {
         crate::theme::apply(&cc.egui_ctx);
 
@@ -32,7 +38,9 @@ impl App {
             universe,
             view_mode: ViewMode::initial(),
             camera:       OrbitCamera::default(),
-            snapshot,
+            snapshot:     None,
+            snapshot_tx,
+            snapshot_rx,
             top_bar:      TopBar::default(),
             map_view:     MapView::default(),
             sector_panel: SectorPanel::default(),
@@ -43,6 +51,23 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Drain any pending save-parse results.
+        while let Ok(msg) = self.snapshot_rx.try_recv() {
+            match msg {
+                SnapshotMessage::Loaded { meta, world, faction_overrides } => {
+                    crate::apply_faction_overrides(&mut self.universe, &faction_overrides);
+                    self.snapshot = Some((meta, world));
+                    ui.ctx().request_repaint();
+                }
+                SnapshotMessage::None => {
+                    eprintln!("[map] No save file found.");
+                }
+                SnapshotMessage::Error(e) => {
+                    eprintln!("[map] Save parse error: {}", e);
+                }
+            }
+        }
+
         // Escape: deselect object (not close)
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         if escape {
@@ -56,12 +81,18 @@ impl eframe::App for App {
             }
         }
 
+        let mut refresh_clicked = false;
         egui::Panel::top("top_bar")
             .exact_size(36.0)
             .show_inside(ui, |ui| {
                 let meta = self.snapshot.as_ref().map(|(m, _)| m);
-                self.top_bar.show(ui, meta);
+                let resp = self.top_bar.show(ui, meta);
+                refresh_clicked = resp.refresh_clicked;
             });
+
+        if refresh_clicked {
+            crate::spawn_save_parse(self.snapshot_tx.clone(), self.universe.sector_macros.clone());
+        }
 
         egui::Panel::right("sector_panel")
             .exact_size(220.0)

@@ -10,8 +10,14 @@ impl Default for TopBar {
     }
 }
 
+#[derive(Default)]
+pub struct TopBarResponse {
+    pub refresh_clicked: bool,
+}
+
 impl TopBar {
-    pub fn show(&mut self, ui: &mut egui::Ui, snapshot: Option<&SnapshotMeta>) {
+    pub fn show(&mut self, ui: &mut egui::Ui, snapshot: Option<&SnapshotMeta>) -> TopBarResponse {
+        let mut resp = TopBarResponse::default();
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             ui.colored_label(crate::theme::ACCENT, "FOUNDATIONS MAP");
@@ -20,6 +26,11 @@ impl TopBar {
                 .hint_text("⌕ Search sectors, stations, ships...")
                 .desired_width(300.0);
             ui.add(search);
+
+            ui.add_space(8.0);
+            if ui.button("Refresh").clicked() {
+                resp.refresh_clicked = true;
+            }
 
             if let Some(meta) = snapshot {
                 ui.add_space(16.0);
@@ -31,6 +42,7 @@ impl TopBar {
                 ));
             }
         });
+        resp
     }
 }
 

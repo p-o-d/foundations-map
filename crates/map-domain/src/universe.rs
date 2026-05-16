@@ -45,6 +45,8 @@ pub struct Universe {
     pub sectors: Vec<Sector>,
     pub clusters: Vec<Cluster>,
     pub connections: Vec<Connection>,
+    /// Lowercase sector macro → SectorId, for resolving save-file references.
+    pub sector_macros: std::collections::HashMap<String, SectorId>,
 }
 
 impl Universe {
@@ -70,11 +72,13 @@ impl Universe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn make_universe() -> Universe {
         let a = SectorId(1);
         let b = SectorId(2);
         Universe {
+            sector_macros: HashMap::new(),
             sectors: vec![
                 Sector {
                     id: a,
