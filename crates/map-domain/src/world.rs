@@ -156,6 +156,8 @@ pub struct SnapshotMeta {
     pub game_time_seconds: f32,
     pub player_money: u64,
     pub player_location_name: String,
+    /// `<game version="X" build="Y">` joined as `"X.Y"`. Empty if unknown.
+    pub game_version: String,
 }
 
 #[cfg(test)]
@@ -170,6 +172,7 @@ mod snapshot_meta_tests {
             game_time_seconds: 1734.285,
             player_money: 40000,
             player_location_name: "Argon Prime".into(),
+            game_version: "800.580735".into(),
         };
         assert_eq!(m.player_money, 40000);
         assert!((m.game_time_seconds - 1734.285).abs() < 1e-3);

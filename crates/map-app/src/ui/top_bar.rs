@@ -16,7 +16,12 @@ pub struct TopBarResponse {
 }
 
 impl TopBar {
-    pub fn show(&mut self, ui: &mut egui::Ui, snapshot: Option<&SnapshotMeta>) -> TopBarResponse {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        snapshot: Option<&SnapshotMeta>,
+        loading: bool,
+    ) -> TopBarResponse {
         let mut resp = TopBarResponse::default();
         ui.horizontal(|ui| {
             ui.add_space(4.0);
@@ -28,17 +33,31 @@ impl TopBar {
             ui.add(search);
 
             ui.add_space(8.0);
-            if ui.button("Refresh").clicked() {
+            let refresh_enabled = !loading;
+            if ui.add_enabled(refresh_enabled, egui::Button::new("Refresh")).clicked() {
                 resp.refresh_clicked = true;
             }
 
             ui.add_space(16.0);
-            if let Some(meta) = snapshot {
+            if loading {
+                ui.add(egui::Spinner::new());
+                ui.add_space(4.0);
+                ui.colored_label(
+                    crate::theme::ACCENT,
+                    if snapshot.is_some() { "Reloading save…" } else { "Loading save…" },
+                );
+            } else if let Some(meta) = snapshot {
+                let version = if meta.game_version.is_empty() {
+                    String::new()
+                } else {
+                    format!("  •  v{}", meta.game_version)
+                };
                 ui.label(format!(
-                    "Snapshot: {}  •  ${}  •  game t={:.0}s",
+                    "Snapshot: {}  •  ${}  •  game t={:.0}s{}",
                     format_age(meta.mtime),
                     format_money(meta.player_money),
                     meta.game_time_seconds,
+                    version,
                 ));
             } else {
                 ui.colored_label(crate::theme::TEXT_MUTED, "No save loaded yet");

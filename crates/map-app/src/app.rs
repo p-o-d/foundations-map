@@ -12,6 +12,7 @@ pub struct App {
     pub view_mode:    ViewMode,
     pub camera:       OrbitCamera,
     pub snapshot:     Option<(SnapshotMeta, World)>,
+    pub snapshot_loading: bool,
     pub snapshot_tx:  mpsc::Sender<SnapshotMessage>,
     pub snapshot_rx:  mpsc::Receiver<SnapshotMessage>,
     top_bar:          TopBar,
@@ -42,6 +43,9 @@ impl App {
             view_mode: ViewMode::initial(),
             camera:       OrbitCamera::default(),
             snapshot:     None,
+            // Start in loading state — the initial save parse fires from main()
+            // before App::new returns.
+            snapshot_loading: true,
             snapshot_tx,
             snapshot_rx,
             top_bar:      TopBar::default(),
@@ -58,16 +62,23 @@ impl eframe::App for App {
         // Drain any pending save-parse results.
         while let Ok(msg) = self.snapshot_rx.try_recv() {
             match msg {
+                SnapshotMessage::Loading => {
+                    self.snapshot_loading = true;
+                    ui.ctx().request_repaint();
+                }
                 SnapshotMessage::Loaded { meta, world, faction_overrides } => {
                     crate::apply_faction_overrides(&mut self.universe, &faction_overrides);
                     self.snapshot = Some((meta, world));
+                    self.snapshot_loading = false;
                     ui.ctx().request_repaint();
                 }
                 SnapshotMessage::None => {
                     eprintln!("[map] No save file found.");
+                    self.snapshot_loading = false;
                 }
                 SnapshotMessage::Error(e) => {
                     eprintln!("[map] Save parse error: {}", e);
+                    self.snapshot_loading = false;
                 }
             }
         }
@@ -90,7 +101,7 @@ impl eframe::App for App {
             .exact_size(36.0)
             .show_inside(ui, |ui| {
                 let meta = self.snapshot.as_ref().map(|(m, _)| m);
-                let resp = self.top_bar.show(ui, meta);
+                let resp = self.top_bar.show(ui, meta, self.snapshot_loading);
                 refresh_clicked = resp.refresh_clicked;
             });
 
@@ -99,8 +110,14 @@ impl eframe::App for App {
         // immediate repaints via their own request_repaint calls.
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
 
-        if refresh_clicked {
+        if refresh_clicked && !self.snapshot_loading {
+            self.snapshot_loading = true;
             crate::spawn_save_parse(self.snapshot_tx.clone(), self.universe.sector_macros.clone());
+        }
+
+        // While loading, repaint quickly so the progress spinner animates.
+        if self.snapshot_loading {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
         }
 
         egui::Panel::right("sector_panel")

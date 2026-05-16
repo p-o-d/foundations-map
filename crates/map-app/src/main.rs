@@ -13,6 +13,10 @@ use map_io::save_parser::FactionOverrides;
 
 /// Message produced by the background save-parser thread.
 pub enum SnapshotMessage {
+    /// Sent by `spawn_save_parse` as soon as the parse thread starts, so the UI
+    /// can flip into a loading state even when the parse was triggered from a
+    /// non-UI thread (file watcher).
+    Loading,
     Loaded {
         meta: SnapshotMeta,
         world: World,
@@ -209,6 +213,8 @@ pub fn spawn_save_parse(
     tx: mpsc::Sender<SnapshotMessage>,
     sector_macros: HashMap<String, SectorId>,
 ) {
+    // Notify UI before parsing so it can show the loading state immediately.
+    let _ = tx.send(SnapshotMessage::Loading);
     std::thread::spawn(move || {
         let msg = parse_latest_save(&sector_macros).unwrap_or(SnapshotMessage::None);
         let _ = tx.send(msg);

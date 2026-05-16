@@ -64,6 +64,7 @@ pub fn parse_save(
         game_time_seconds: 0.0,
         player_money: 0,
         player_location_name: String::new(),
+        game_version: String::new(),
     };
 
     let mut world = World::new();
@@ -79,6 +80,14 @@ pub fn parse_save(
                     if let Some(t) = attr_value(e, b"time") {
                         meta.game_time_seconds = t.parse().unwrap_or(0.0);
                     }
+                    let ver = attr_value(e, b"version").unwrap_or_default();
+                    let build = attr_value(e, b"build").unwrap_or_default();
+                    meta.game_version = match (ver.is_empty(), build.is_empty()) {
+                        (false, false) => format!("{}.{}", ver, build),
+                        (false, true)  => ver,
+                        (true,  false) => build,
+                        _              => String::new(),
+                    };
                 }
                 b"player" => {
                     if let Some(m) = attr_value(e, b"money") {
