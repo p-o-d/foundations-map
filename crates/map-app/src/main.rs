@@ -38,7 +38,7 @@ fn main() -> eframe::Result<()> {
 
     // Start a watcher on the save directory; whenever a .xml.gz settles,
     // kick off a fresh save parse via the existing snapshot channel.
-    let watcher = if let Some(dir) = save_dir() {
+    let watcher = if let Some((_, dir)) = find_latest_save() {
         let (wtx, wrx) = std::sync::mpsc::channel();
         match map_io::save_watcher::watch_save_dir(&dir, wtx) {
             Ok(w) => {
@@ -103,31 +103,56 @@ fn load_universe() -> map_domain::universe::Universe {
     }
 }
 
-fn save_dir() -> Option<std::path::PathBuf> {
-    // Linux: ~/.config/EgoSoft/X4/<id>/save  ; we use dirs::config_dir() for /Documents on Windows-equivalent.
-    let base = dirs::config_dir()?.join("EgoSoft").join("X4");
-    let mut entries = std::fs::read_dir(&base).ok()?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .map(|e| e.path())
-        .collect::<Vec<_>>();
-    entries.sort();
-    entries.into_iter().next().map(|p| p.join("save"))
-}
+/// Enumerate all save directories X4 might use on this system. Includes:
+///   - native Linux:  `~/.config/EgoSoft/X4/<id>/save/`
+///   - Steam Proton:  `~/.local/share/Steam/steamapps/compatdata/392160/pfx/drive_c/users/steamuser/Documents/Egosoft/X4/<id>/save/`
+///   - native Windows: `<Documents>/Egosoft/X4/<id>/save/`
+fn candidate_save_dirs() -> Vec<std::path::PathBuf> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(c) = dirs::config_dir() {
+        roots.push(c.join("EgoSoft").join("X4"));
+    }
+    if let Some(d) = dirs::document_dir() {
+        roots.push(d.join("Egosoft").join("X4"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home.join(".local/share/Steam/steamapps/compatdata/392160/pfx/drive_c/users/steamuser/Documents/Egosoft/X4"));
+    }
 
-fn latest_save(save_dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let mut latest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
-    for e in std::fs::read_dir(save_dir).ok()?.filter_map(|e| e.ok()) {
-        let p = e.path();
-        let name = p.file_name()?.to_str()?.to_string();
-        if !name.ends_with(".xml.gz") { continue; }
-        let mtime = e.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
-        match &latest {
-            Some((t, _)) if *t >= mtime => {}
-            _ => latest = Some((mtime, p)),
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    for root in roots {
+        let Ok(rd) = std::fs::read_dir(&root) else { continue };
+        for e in rd.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+            let save = e.path().join("save");
+            if save.is_dir() {
+                out.push(save);
+            }
         }
     }
-    latest.map(|(_, p)| p)
+    out
+}
+
+/// Pick the single newest `.xml.gz` across every candidate save dir. Returns
+/// `(save_file_path, containing_dir)` so the watcher can watch the active dir.
+fn find_latest_save() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let mut best: Option<(std::time::SystemTime, std::path::PathBuf, std::path::PathBuf)> = None;
+    for dir in candidate_save_dirs() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.filter_map(|e| e.ok()) {
+            let p = e.path();
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else { continue };
+            if !name.ends_with(".xml.gz") { continue; }
+            let mtime = e
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            if best.as_ref().map_or(true, |(t, _, _)| mtime > *t) {
+                best = Some((mtime, p.clone(), dir.clone()));
+            }
+        }
+    }
+    best.map(|(_, p, d)| (p, d))
 }
 
 /// Locate the latest save, parse it (resolving entities via `sector_macros`), and
@@ -137,8 +162,7 @@ fn latest_save(save_dir: &std::path::Path) -> Option<std::path::PathBuf> {
 pub fn parse_latest_save(
     sector_macros: &HashMap<String, SectorId>,
 ) -> Option<SnapshotMessage> {
-    let dir = save_dir()?;
-    let path = latest_save(&dir)?;
+    let (path, _dir) = find_latest_save()?;
     eprintln!("[map] Loading save: {:?}", path);
     match map_io::save_parser::parse_save(&path, Some(sector_macros)) {
         Ok((meta, world, faction_overrides)) => {
