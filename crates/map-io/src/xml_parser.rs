@@ -230,6 +230,28 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] God objects loaded: {}", god_counter);
 
+    // Parse superhighway connection zones from sectors.xml (entry/exit points within sectors).
+    let mut sh_counter = 0u32;
+    if let Some(sectors_data) = crate::cat_reader::read_game_file(game_dir, "maps/xu_ep2_universe/sectors.xml") {
+        let sectors_str = String::from_utf8_lossy(&sectors_data);
+        for (sec_lower, x, y, z, name) in parse_superhighway_zones_xml(&sectors_str) {
+            if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
+                if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
+                    sh_counter += 1;
+                    sector.static_objects.push(StaticObject {
+                        id:       ObjectId(40_000 + sh_counter),
+                        kind:     StaticObjectKind::Gate,
+                        position: Vec3::new(x, y, z),
+                        faction:  None,
+                        name,
+                        rotation: None,
+                    });
+                }
+            }
+        }
+    }
+    eprintln!("[map] Superhighway connections loaded: {}", sh_counter);
+
     Ok(Universe { sectors, connections })
 }
 
@@ -723,6 +745,87 @@ pub fn zone_name_to_sector_macro(name: &str) -> Option<String> {
 fn zone_macro_to_sector_lower(mac: &str) -> Option<String> {
     let lower = mac.to_lowercase();
     lower.find("cluster_").map(|pos| lower[pos..].to_string())
+}
+
+/// sectors.xml: SHCon zones — superhighway entry/exit points within a sector.
+/// Returns (sector_macro_lower, x_km, y_km, z_km, display_name).
+/// Zone macro pattern: `tzone<SectorMacroFragment>SHCon{N}_GateZone_macro`.
+fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result = Vec::new();
+    let mut current_sector: Option<String> = None;
+    let mut in_conn = false;
+    let mut in_offset = false;
+    let mut pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
+    let mut zone_macro: Option<String> = None;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                b"macro" => {
+                    let class = attr_value(e, b"class").unwrap_or_default();
+                    if class == "sector" {
+                        current_sector = attr_value(e, b"name").map(|s| s.to_lowercase());
+                    }
+                }
+                b"connection" if current_sector.is_some() => {
+                    in_conn = true;
+                    pos = (0.0, 0.0, 0.0);
+                    zone_macro = None;
+                }
+                b"offset" if in_conn => in_offset = true,
+                _ => {}
+            },
+            Ok(Event::Empty(ref e)) => match e.name().as_ref() {
+                b"position" if in_offset => {
+                    pos.0 = attr_value(e, b"x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    pos.1 = attr_value(e, b"y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    pos.2 = attr_value(e, b"z").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                }
+                b"macro" if in_conn => {
+                    zone_macro = attr_value(e, b"ref");
+                }
+                _ => {}
+            },
+            Ok(Event::End(ref e)) => match e.name().as_ref() {
+                b"offset" => in_offset = false,
+                b"connection" if in_conn => {
+                    if let (Some(sec), Some(zm)) = (&current_sector, zone_macro.take()) {
+                        // Only SHCon zones (superhighway connection points).
+                        if zm.to_lowercase().contains("shcon") {
+                            // Extract SHConN for display.
+                            let lower = zm.to_lowercase();
+                            let shcon_label = lower
+                                .find("shcon")
+                                .map(|i| {
+                                    let rest = &lower[i..];
+                                    let end = rest
+                                        .find(|c: char| !c.is_ascii_alphanumeric())
+                                        .unwrap_or(rest.len());
+                                    rest[..end].to_string()
+                                })
+                                .unwrap_or_else(|| "shcon".into());
+                            let name = format!("Superhighway {}", shcon_label.to_uppercase());
+                            result.push((sec.clone(), pos.0 / 1000.0, pos.1 / 1000.0, pos.2 / 1000.0, name));
+                        }
+                    }
+                    in_conn = false;
+                }
+                b"macro" => {
+                    current_sector = None;
+                    in_conn = false;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
 }
 
 /// god.xml: fixed object placements.

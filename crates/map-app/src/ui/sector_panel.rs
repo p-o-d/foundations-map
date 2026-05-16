@@ -72,6 +72,8 @@ impl SectorPanel {
                 ui.add_space(2.0);
                 ui.colored_label(theme::ACCENT, &obj.name);
                 ui.add_space(2.0);
+                ui.colored_label(theme::TEXT_MUTED, format!("Type: {}", kind_label(&obj.kind)));
+                ui.add_space(2.0);
                 ui.colored_label(theme::TEXT_MUTED, format!(
                     "x {:.1}  y {:.1}  z {:.1} km",
                     obj.position.x, obj.position.y, obj.position.z
@@ -126,6 +128,16 @@ fn kind_icon(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
         Gate         => "◯",
         ResourceZone => "◎",
         Anomaly      => "✦",
+    }
+}
+
+fn kind_label(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
+    use map_domain::objects::StaticObjectKind::*;
+    match kind {
+        Station      => "Station",
+        Gate         => "Gate",
+        ResourceZone => "Resource zone",
+        Anomaly      => "Anomaly",
     }
 }
 
