@@ -100,10 +100,10 @@ fn draw_dotted_flow(
     color: egui::Color32,
     time: f32,
 ) {
-    const SAMPLES: usize = 80;
-    const NUM_DOTS: usize = 24;
-    const DOT_RADIUS: f32 = 2.0;
-    const SPEED: f32 = 0.10;
+    const NUM_DASHES: usize = 18;
+    const DASH_LEN:   f32   = 0.025; // fraction of curve length
+    const STROKE_W:   f32   = 2.0;
+    const SPEED:      f32   = 0.05;
 
     let sample = |t: f32| -> Pos2 {
         match ctrl_screen {
@@ -118,13 +118,14 @@ fn draw_dotted_flow(
         }
     };
     let phase = (time * SPEED).rem_euclid(1.0);
-    for i in 0..NUM_DOTS {
-        let t = ((i as f32 / NUM_DOTS as f32) + phase).rem_euclid(1.0);
-        if t < 0.04 || t > 0.96 { continue; }
-        let p = sample(t);
-        painter.circle_filled(p, DOT_RADIUS, color);
+    for i in 0..NUM_DASHES {
+        let t0 = ((i as f32 / NUM_DASHES as f32) + phase).rem_euclid(1.0);
+        let t1 = (t0 + DASH_LEN).rem_euclid(1.0);
+        // Skip dashes spanning the wrap-around or sitting on endpoints
+        if t1 < t0 { continue; }
+        if t0 < 0.04 || t1 > 0.96 { continue; }
+        painter.line_segment([sample(t0), sample(t1)], Stroke::new(STROKE_W, color));
     }
-    let _ = SAMPLES;
 }
 
 pub struct MapView {
