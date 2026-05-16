@@ -267,8 +267,8 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
 
     let ring_color  = egui::Color32::from_rgba_premultiplied(100, 200, 255, 230);
     let arrow_color = egui::Color32::from_rgba_premultiplied(220, 220, 80, 230);
-    const RING_PX:  f32   = 18.0;
-    const ARROW_PX: f32   = 32.0;
+    const RING_PX:  f32   = 9.0;
+    const ARROW_PX: f32   = 16.0;
     const SEGMENTS: usize = 32;
 
     for obj in &sector.static_objects {
@@ -306,13 +306,18 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
             painter.line_segment([pts[i], pts[(i + 1) % SEGMENTS]], egui::Stroke::new(1.5, ring_color));
         }
 
-        // Arrow on Y=0 plane: starts at gate (X,0,Z), extends toward origin, single arrowhead at far end.
-        let a_start_world = Vec3::new(obj.position.x, 0.0, obj.position.z);
-        let a_end_world   = a_start_world + dir * arrow_len;
-        let Some(s_start) = project(a_start_world) else { continue };
-        let Some(s_end)   = project(a_end_world)   else { continue };
-        painter.line_segment([s_start, s_end], egui::Stroke::new(1.5, arrow_color));
-        draw_arrowhead(painter, s_end, s_start, arrow_color);
+        // Two arrows on Y=0 plane, opposite directions: one toward origin, one away.
+        // Each is single-sided with arrowhead at its outer tip.
+        let center = Vec3::new(obj.position.x, 0.0, obj.position.z);
+        let tip_inward  = center + dir * arrow_len;
+        let tip_outward = center - dir * arrow_len;
+        let Some(s_center)  = project(center)      else { continue };
+        let Some(s_inward)  = project(tip_inward)  else { continue };
+        let Some(s_outward) = project(tip_outward) else { continue };
+        painter.line_segment([s_center, s_inward],  egui::Stroke::new(1.5, arrow_color));
+        painter.line_segment([s_center, s_outward], egui::Stroke::new(1.5, arrow_color));
+        draw_arrowhead(painter, s_inward,  s_center, arrow_color);
+        draw_arrowhead(painter, s_outward, s_center, arrow_color);
     }
 }
 
