@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repo.
 
 ## Project
 
-`foundations-map` — Interactive 2D universe map + 3D sector view for X4 Foundations (space sim). Rust workspace, edition 2024, cross-platform (Linux Wayland + Windows). 47 tests across 6 suites.
+`foundations-map` — Interactive 2D universe map + 3D sector view for X4 Foundations (space sim). Rust workspace, edition 2024, cross-platform (Linux Wayland + Windows). 53 tests across 6 suites.
 
 ## Commands
 
@@ -135,7 +135,7 @@ pub struct StaticObject {
 |---|---|---|
 | 1 — 2D Universe Map | ✅ done | DLC sectors, faction-colored hexes, connections, clusters |
 | 2 — 3D Sector View | ✅ done + bonus | Gates as 2D overlays, stations from god.xml, full property panel |
-| 3 — Live Data | 🔍 spec rewrite | HTTP API spec was stale; current plan: parse save-game XML (see `docs/superpowers/specs/2026-05-15-phase3-livedata.md`) |
+| 3 — Live Data | ✅ done | Save-game XML snapshot parsed in background; auto-reload via notify watcher; live ships in 3D + per-sector counts on 2D |
 | 4 — Search + Polish | ⏸ later | Search index over 144 sectors + 743 static objects |
 
 ## Conventions

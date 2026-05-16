@@ -1,3 +1,7 @@
+// NOTE (Phase 3 polish): no panel-level "no save loaded" hint here — the
+// top-bar already shows that state and plumbing the snapshot through to the
+// panel just to repeat the message isn't worth the parameter churn. Revisit
+// if/when the panel grows live-data sections (per-sector ship list, etc.).
 use map_domain::ids::ObjectId;
 use map_domain::universe::{Sector, Universe, GateType};
 use map_domain::view::ViewMode;

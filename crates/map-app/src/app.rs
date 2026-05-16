@@ -94,6 +94,11 @@ impl eframe::App for App {
                 refresh_clicked = resp.refresh_clicked;
             });
 
+        // Keep the snapshot-age label fresh without burning CPU: tick at most
+        // every 30s. Real state changes (watcher, refresh button) still cause
+        // immediate repaints via their own request_repaint calls.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
+
         if refresh_clicked {
             crate::spawn_save_parse(self.snapshot_tx.clone(), self.universe.sector_macros.clone());
         }
