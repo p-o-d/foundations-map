@@ -7,9 +7,16 @@ use map_domain::ids::ObjectId;
 use map_domain::objects::StaticObjectKind;
 use map_domain::universe::Sector;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickedTarget {
+    Static(ObjectId),
+    Entity(map_domain::world::EntityId),
+}
+
 pub struct SectorViewResponse {
     pub close_clicked: bool,
-    pub clicked_object: Option<ObjectId>,
+    pub clicked: Option<ClickedTarget>,
+    pub hovered: Option<ClickedTarget>,
 }
 
 #[derive(Default)]
@@ -22,10 +29,11 @@ impl SectorView3D {
         sector: Option<&Sector>,
         camera: &mut OrbitCamera,
         selected_obj: Option<ObjectId>,
+        selected_entity: Option<map_domain::world::EntityId>,
         world: Option<&map_domain::world::World>,
+        universe: &map_domain::universe::Universe,
     ) -> SectorViewResponse {
         let mut close_clicked = false;
-        let mut clicked_object = None;
 
         let available = ui.available_rect_before_wrap();
         let canvas_w = available.width() * 0.80;
@@ -79,16 +87,9 @@ impl SectorView3D {
             camera.zoom(scroll * 0.01);
         }
 
-        // Screen-space object picking on click
-        if canvas_resp.clicked() {
-            if let (Some(pos), Some(sec)) = (canvas_resp.interact_pointer_pos(), sector) {
-                clicked_object = pick_object(pos, view_rect, camera, sec);
-            }
-        }
-
         // Build draw calls (model matrix only; view/proj applied below)
         let draw_calls_model = sector
-            .map(|s| build_draw_calls(s, selected_obj))
+            .map(|s| build_draw_calls(s, world, universe, selected_obj, selected_entity))
             .unwrap_or_default();
 
         // Apply view + projection to get final MVP per draw call
@@ -120,10 +121,16 @@ impl SectorView3D {
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
         draw_axis_arrows(ui.painter(), view_rect, camera);
 
-        // Live entities from save snapshot (ships + stations) as screen-space markers.
-        if let (Some(sec), Some(world)) = (sector, world) {
-            draw_live_ships(ui.painter(), view_rect, camera, sec.id, world);
+        // Click + hover detection — unified across static + live targets.
+        let mut clicked: Option<ClickedTarget> = None;
+        if canvas_resp.clicked() {
+            if let (Some(pos), Some(sec)) = (canvas_resp.interact_pointer_pos(), sector) {
+                clicked = pick_target(pos, view_rect, camera, sec, world);
+            }
         }
+        let hovered = canvas_resp.hover_pos().and_then(|pos| {
+            sector.and_then(|sec| pick_target(pos, view_rect, camera, sec, world))
+        });
 
         // Border around canvas
         ui.painter().rect_stroke(
@@ -135,58 +142,111 @@ impl SectorView3D {
 
         SectorViewResponse {
             close_clicked,
-            clicked_object,
+            clicked,
+            hovered,
         }
     }
 }
 
 /// Build per-object draw calls with model matrix (translate + scale) and color.
-fn build_draw_calls(sector: &Sector, selected: Option<ObjectId>) -> Vec<DrawCall> {
-    sector
-        .static_objects
-        .iter()
-        .filter(|obj| !matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway))
-        .map(|obj| {
-            let scale = match obj.kind {
-                StaticObjectKind::Station => 3.0,
-                StaticObjectKind::Gate => 4.0,
-                StaticObjectKind::ResourceZone => 8.0,
-                StaticObjectKind::Anomaly => 2.0,
-                StaticObjectKind::Highway => 4.0,
+fn build_draw_calls(
+    sector: &Sector,
+    world: Option<&map_domain::world::World>,
+    universe: &map_domain::universe::Universe,
+    selected_obj: Option<ObjectId>,
+    selected_entity: Option<map_domain::world::EntityId>,
+) -> Vec<DrawCall> {
+    let mut calls: Vec<DrawCall> = Vec::new();
+
+    // Static objects (existing path; excludes gates + highways which render in 2D).
+    for obj in &sector.static_objects {
+        if matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway) {
+            continue;
+        }
+        let scale = match obj.kind {
+            StaticObjectKind::Station => 3.0,
+            StaticObjectKind::Gate => 4.0,
+            StaticObjectKind::ResourceZone => 8.0,
+            StaticObjectKind::Anomaly => 2.0,
+            StaticObjectKind::Highway => 4.0,
+        };
+        let mesh = match obj.kind {
+            StaticObjectKind::Station => MeshKind::Box,
+            StaticObjectKind::Gate => MeshKind::Ring,
+            StaticObjectKind::ResourceZone => MeshKind::Sphere,
+            StaticObjectKind::Anomaly => MeshKind::Sphere,
+            StaticObjectKind::Highway => MeshKind::Ring,
+        };
+        let color = if selected_obj == Some(obj.id) {
+            [1.0, 0.8, 0.1, 1.0]
+        } else {
+            kind_color(&obj.kind)
+        };
+        let rotation = obj
+            .rotation
+            .map(|(p, y, r)| {
+                Mat4::from_euler(
+                    glam::EulerRot::YXZ,
+                    y.to_radians(),
+                    p.to_radians(),
+                    r.to_radians(),
+                )
+            })
+            .unwrap_or(Mat4::IDENTITY);
+        let model =
+            Mat4::from_translation(obj.position) * rotation * Mat4::from_scale(Vec3::splat(scale));
+        calls.push(DrawCall {
+            kind: mesh,
+            mvp: model,
+            color,
+        });
+    }
+
+    // Live entities: top-level only (parent.is_none()).
+    if let Some(world) = world {
+        use map_domain::world::LiveObjectKind;
+        for &eid in world.entities_in_sector(sector.id) {
+            if world.parent_of(eid).is_some() {
+                continue; // docked / subordinate — invisible in scene, listed in panel
+            }
+            let Some(&pos) = world.positions.get(&eid) else {
+                continue;
             };
-            let kind = match obj.kind {
-                StaticObjectKind::Station => MeshKind::Box,
-                StaticObjectKind::Gate => MeshKind::Ring,
-                StaticObjectKind::ResourceZone => MeshKind::Sphere,
-                StaticObjectKind::Anomaly => MeshKind::Sphere,
-                StaticObjectKind::Highway => MeshKind::Ring,
+            let kind = world.kinds.get(&eid);
+            let (mesh, scale) = match kind {
+                Some(LiveObjectKind::Station) => (MeshKind::Box, 4.0),
+                Some(LiveObjectKind::ShipExtraLarge) => (MeshKind::Box, 2.5),
+                Some(LiveObjectKind::ShipLarge) => (MeshKind::Box, 1.5),
+                Some(LiveObjectKind::ShipMedium) => (MeshKind::Sphere, 1.0),
+                Some(LiveObjectKind::ShipSmall) => (MeshKind::Sphere, 0.5),
+                None => continue,
             };
-            let color = if selected == Some(obj.id) {
-                [1.0, 0.8, 0.1, 1.0] // yellow = selected
+            let fcolor = world
+                .factions
+                .get(&eid)
+                .copied()
+                .map(|fid| crate::colors::faction_color(universe, fid))
+                .unwrap_or(crate::theme::TEXT_MUTED);
+            let base = [
+                fcolor.r() as f32 / 255.0,
+                fcolor.g() as f32 / 255.0,
+                fcolor.b() as f32 / 255.0,
+                1.0,
+            ];
+            let color = if selected_entity == Some(eid) {
+                [1.0, 0.8, 0.1, 1.0]
             } else {
-                kind_color(&obj.kind)
+                base
             };
-            let rotation = obj
-                .rotation
-                .map(|(pitch, yaw, roll)| {
-                    Mat4::from_euler(
-                        glam::EulerRot::YXZ,
-                        yaw.to_radians(),
-                        pitch.to_radians(),
-                        roll.to_radians(),
-                    )
-                })
-                .unwrap_or(Mat4::IDENTITY);
-            let model = Mat4::from_translation(obj.position)
-                * rotation
-                * Mat4::from_scale(Vec3::splat(scale));
-            DrawCall {
-                kind,
+            let model = Mat4::from_translation(pos) * Mat4::from_scale(Vec3::splat(scale));
+            calls.push(DrawCall {
+                kind: mesh,
                 mvp: model,
                 color,
-            }
-        })
-        .collect()
+            });
+        }
+    }
+    calls
 }
 
 fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
@@ -199,28 +259,56 @@ fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
     }
 }
 
-/// Project each object to screen space; return id of object nearest to click (within 20px).
-fn pick_object(ptr: Pos2, rect: Rect, camera: &OrbitCamera, sector: &Sector) -> Option<ObjectId> {
+/// Project each object and entity to screen space; return the target nearest to click (within 20px).
+fn pick_target(
+    ptr: egui::Pos2,
+    rect: egui::Rect,
+    camera: &OrbitCamera,
+    sector: &Sector,
+    world: Option<&map_domain::world::World>,
+) -> Option<ClickedTarget> {
     let aspect = rect.width() / rect.height().max(1.0);
     let vp = camera.proj_matrix(aspect) * camera.view_matrix();
-    let mut best_id = None;
-    let mut best_dist = f32::MAX;
+    let mut best: Option<(f32, ClickedTarget)> = None;
 
-    for obj in &sector.static_objects {
-        let clip = vp * obj.position.extend(1.0);
+    let project = |w_pos: Vec3| -> Option<egui::Pos2> {
+        let clip = vp * w_pos.extend(1.0);
         if clip.w <= 0.0 {
-            continue;
+            return None;
         }
         let ndc = clip.truncate() / clip.w;
-        let sx = (ndc.x * 0.5 + 0.5) * rect.width() + rect.left();
-        let sy = (1.0 - (ndc.y * 0.5 + 0.5)) * rect.height() + rect.top();
-        let dist = ((sx - ptr.x).powi(2) + (sy - ptr.y).powi(2)).sqrt();
-        if dist < 20.0 && dist < best_dist {
-            best_dist = dist;
-            best_id = Some(obj.id);
+        Some(egui::Pos2::new(
+            (ndc.x * 0.5 + 0.5) * rect.width() + rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * rect.height() + rect.top(),
+        ))
+    };
+
+    let consider = |sp: egui::Pos2, target: ClickedTarget, best: &mut Option<(f32, ClickedTarget)>| {
+        let d = ((sp.x - ptr.x).powi(2) + (sp.y - ptr.y).powi(2)).sqrt();
+        if d < 20.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
+            *best = Some((d, target));
+        }
+    };
+
+    for obj in &sector.static_objects {
+        if let Some(sp) = project(obj.position) {
+            consider(sp, ClickedTarget::Static(obj.id), &mut best);
         }
     }
-    best_id
+    if let Some(world) = world {
+        for &eid in world.entities_in_sector(sector.id) {
+            if world.parent_of(eid).is_some() {
+                continue;
+            }
+            let Some(&pos) = world.positions.get(&eid) else {
+                continue;
+            };
+            if let Some(sp) = project(pos) {
+                consider(sp, ClickedTarget::Entity(eid), &mut best);
+            }
+        }
+    }
+    best.map(|(_, t)| t)
 }
 
 /// Draw 6 direction arrows from sector origin: E(+X), W(-X), Up(+Y), Dn(-Y), N(-Z), S(+Z).
@@ -470,72 +558,4 @@ fn draw_arrowhead(
         color,
         egui::Stroke::NONE,
     ));
-}
-
-
-fn draw_live_ships(
-    painter: &egui::Painter,
-    view_rect: Rect,
-    camera: &OrbitCamera,
-    sector_id: map_domain::ids::SectorId,
-    world: &map_domain::world::World,
-) {
-    use map_domain::world::LiveObjectKind;
-    let aspect = view_rect.width() / view_rect.height().max(1.0);
-    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
-
-    let project = |world_pos: Vec3| -> Option<egui::Pos2> {
-        let clip = vp * world_pos.extend(1.0);
-        if clip.w <= 0.0 {
-            return None;
-        }
-        let ndc = clip.truncate() / clip.w;
-        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 {
-            return None;
-        }
-        Some(egui::Pos2::new(
-            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
-            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
-        ))
-    };
-
-    for &eid in world.entities_in_sector(sector_id) {
-        let Some(&pos) = world.positions.get(&eid) else {
-            continue;
-        };
-        let Some(screen) = project(pos) else { continue };
-        let kind = world.kinds.get(&eid);
-        let size = match kind {
-            Some(LiveObjectKind::ShipSmall) => 4.0,
-            Some(LiveObjectKind::ShipMedium) => 6.0,
-            Some(LiveObjectKind::ShipLarge) => 10.0,
-            Some(LiveObjectKind::ShipExtraLarge) => 14.0,
-            Some(LiveObjectKind::Station) => 16.0,
-            None => 4.0,
-        };
-        // TEMP T15: replaced by GPU draw path
-        let color = egui::Color32::from_rgba_unmultiplied(200, 200, 200, 200);
-
-        match kind {
-            Some(LiveObjectKind::Station) => {
-                // Filled square
-                painter.rect_filled(
-                    egui::Rect::from_center_size(screen, egui::Vec2::splat(size)),
-                    0.0,
-                    color,
-                );
-            }
-            _ => {
-                // Equilateral triangle pointing up
-                let s = size;
-                let h = s * 0.866;
-                let pts = vec![
-                    egui::Pos2::new(screen.x, screen.y - h * 0.5),
-                    egui::Pos2::new(screen.x - s * 0.5, screen.y + h * 0.5),
-                    egui::Pos2::new(screen.x + s * 0.5, screen.y + h * 0.5),
-                ];
-                painter.add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
-            }
-        }
-    }
 }

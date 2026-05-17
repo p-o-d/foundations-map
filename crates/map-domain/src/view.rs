@@ -103,6 +103,13 @@ impl ViewMode {
         }
     }
 
+    pub fn selected_object(&self) -> Option<ObjectId> {
+        match self {
+            ViewMode::SectorView { selected_obj, .. } => *selected_obj,
+            _ => None,
+        }
+    }
+
     pub fn selected_entity(&self) -> Option<EntityId> {
         match self {
             ViewMode::SectorView { selected_entity, .. } => *selected_entity,

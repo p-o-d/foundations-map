@@ -176,32 +176,43 @@ impl eframe::App for App {
             let selected = self.view_mode.selected_sector();
 
             match self.view_mode.clone() {
-                ViewMode::SectorView {
-                    sector,
-                    selected_obj,
-                    ..
-                } => {
+                ViewMode::SectorView { sector, .. } => {
                     // Compute positions before calling show to avoid double-borrow of self.universe
                     let sec = self.universe.sector(sector);
                     let sv_resp = self.sector_view.show(
                         ui,
                         sec,
                         &mut self.camera,
-                        selected_obj,
+                        self.view_mode.selected_object(),
+                        self.view_mode.selected_entity(),
                         self.snapshot.as_ref().map(|(_, w)| w),
+                        &self.universe,
                     );
                     if sv_resp.close_clicked {
                         self.view_mode = self.view_mode.clone().close_sector_3d();
                     }
-                    if let Some(obj_id) = sv_resp.clicked_object {
-                        self.view_mode = self.view_mode.clone().select_object(obj_id);
-                        let positions: Vec<_> = self
-                            .universe
-                            .sector(sector)
-                            .and_then(|s| s.static_objects.iter().find(|o| o.id == obj_id))
-                            .map(|obj| vec![obj.position])
-                            .unwrap_or_default();
-                        self.camera.fit_all(&positions);
+                    match sv_resp.clicked {
+                        Some(crate::ui::sector_view::ClickedTarget::Static(obj_id)) => {
+                            self.view_mode = self.view_mode.clone().select_object(obj_id);
+                            let positions: Vec<_> = self
+                                .universe
+                                .sector(sector)
+                                .and_then(|s| {
+                                    s.static_objects.iter().find(|o| o.id == obj_id)
+                                })
+                                .map(|obj| vec![obj.position])
+                                .unwrap_or_default();
+                            self.camera.fit_all(&positions);
+                        }
+                        Some(crate::ui::sector_view::ClickedTarget::Entity(eid)) => {
+                            self.view_mode = self.view_mode.clone().select_entity(eid);
+                            if let Some((_, world)) = &self.snapshot {
+                                if let Some(&pos) = world.positions.get(&eid) {
+                                    self.camera.fit_all(&[pos]);
+                                }
+                            }
+                        }
+                        None => {}
                     }
                 }
                 ViewMode::UniverseMap { .. } => {
