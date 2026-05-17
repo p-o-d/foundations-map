@@ -11,6 +11,8 @@ pub struct SectorPanelResponse {
     pub open_3d_clicked: bool,
     pub back_to_map_clicked: bool,
     pub object_clicked: Option<ObjectId>,
+    pub entity_clicked: Option<map_domain::world::EntityId>,
+    pub back_to_parent_clicked: bool,
 }
 
 #[derive(Default)]
@@ -23,6 +25,7 @@ impl SectorPanel {
         sector: Option<&Sector>,
         universe: &Universe,
         view_mode: &ViewMode,
+        world: Option<&map_domain::world::World>,
     ) -> SectorPanelResponse {
         ui.add_space(8.0);
 
@@ -34,6 +37,8 @@ impl SectorPanel {
                 open_3d_clicked: false,
                 back_to_map_clicked: false,
                 object_clicked: None,
+                entity_clicked: None,
+                back_to_parent_clicked: false,
             };
         };
 
@@ -51,7 +56,9 @@ impl SectorPanel {
         ui.separator();
         ui.add_space(8.0);
 
-        let mut object_clicked = None;
+        let mut object_clicked: Option<ObjectId> = None;
+        let mut entity_clicked: Option<map_domain::world::EntityId> = None;
+        let mut back_to_parent_clicked = false;
 
         // Reserve space at the bottom for the "Open 3D View" button so it stays visible.
         let scroll_height = (ui.available_height() - 44.0).max(80.0);
@@ -59,40 +66,125 @@ impl SectorPanel {
             .auto_shrink([false, false])
             .max_height(scroll_height)
             .show(ui, |ui| {
-                if let ViewMode::SectorView { selected_obj, .. } = view_mode {
-                    ui.colored_label(theme::TEXT_MUTED, "OBJECTS");
-                    ui.add_space(4.0);
-                    if sector.static_objects.is_empty() {
-                        ui.colored_label(theme::TEXT_MUTED, "None loaded");
-                    }
-                    for obj in &sector.static_objects {
-                        let is_sel = *selected_obj == Some(obj.id);
-                        let label = format!("{} {}", kind_icon(&obj.kind), &obj.name);
-                        let color = if is_sel {
-                            theme::ACCENT
-                        } else {
-                            theme::TEXT_PRIMARY
-                        };
-                        if ui.colored_label(color, &label).clicked() {
-                            object_clicked = Some(obj.id);
+                if let ViewMode::SectorView { selected_obj, selected_entity, .. } = view_mode {
+                    // ─── Static objects ──────────────────────────────────
+                    egui::CollapsingHeader::new(format!(
+                        "STATIC OBJECTS ({})",
+                        sector.static_objects.len()
+                    ))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for obj in &sector.static_objects {
+                            let is_sel = *selected_obj == Some(obj.id);
+                            let label = format!("{} {}", kind_icon(&obj.kind), &obj.name);
+                            let color = if is_sel { theme::ACCENT } else { theme::TEXT_PRIMARY };
+                            if ui.colored_label(color, &label).clicked() {
+                                object_clicked = Some(obj.id);
+                            }
+                        }
+                    });
+
+                    // ─── Live entities, grouped ──────────────────────────
+                    if let Some(world) = world {
+                        use map_domain::world::LiveObjectKind;
+                        let mut by_group: std::collections::HashMap<&'static str, Vec<map_domain::world::EntityId>> = std::collections::HashMap::new();
+                        for &eid in world.entities_in_sector(sector.id) {
+                            if world.parent_of(eid).is_some() { continue; }
+                            let bucket = match world.kinds.get(&eid) {
+                                Some(LiveObjectKind::Station) => "STATIONS",
+                                Some(LiveObjectKind::ShipExtraLarge) | Some(LiveObjectKind::ShipLarge) => "CAPITALS",
+                                Some(LiveObjectKind::ShipMedium) => "MEDIUM",
+                                Some(LiveObjectKind::ShipSmall) => "SMALL",
+                                None => continue,
+                            };
+                            by_group.entry(bucket).or_default().push(eid);
+                        }
+                        for &group in &["STATIONS", "CAPITALS", "MEDIUM", "SMALL"] {
+                            if let Some(eids) = by_group.get(group) {
+                                egui::CollapsingHeader::new(format!("{} ({})", group, eids.len()))
+                                    .default_open(group == "STATIONS")
+                                    .show(ui, |ui| {
+                                        for &eid in eids {
+                                            let is_sel = *selected_entity == Some(eid);
+                                            let (label, icon) = entity_row_label(world, eid);
+                                            let color = if is_sel { theme::ACCENT } else { theme::TEXT_PRIMARY };
+                                            let row = format!("{} {}", icon, label);
+                                            if ui.colored_label(color, &row).clicked() {
+                                                entity_clicked = Some(eid);
+                                            }
+                                            // Faction line under the row.
+                                            if let Some(&fid) = world.factions.get(&eid) {
+                                                let f_name = crate::colors::faction_name(universe, fid);
+                                                let f_color = crate::colors::faction_color(universe, fid);
+                                                ui.horizontal(|ui| {
+                                                    ui.add_space(20.0);
+                                                    ui.colored_label(f_color, "●");
+                                                    ui.colored_label(theme::TEXT_MUTED, f_name);
+                                                });
+                                            }
+                                        }
+                                    });
+                            }
                         }
                     }
 
-                    if let Some(obj) = selected_obj
+                    // ─── SELECTED detail ─────────────────────────────────
+                    if let Some(eid) = *selected_entity {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+                        ui.colored_label(theme::TEXT_MUTED, "SELECTED");
+                        if let Some(parent) = world.and_then(|w| w.parent_of(eid)) {
+                            let parent_label = world.map(|w| entity_row_label(w, parent).0).unwrap_or_default();
+                            if ui.button(format!("← Back to {}", parent_label)).clicked() {
+                                back_to_parent_clicked = true;
+                            }
+                        }
+                        if let Some(world) = world {
+                            let (label, icon) = entity_row_label(world, eid);
+                            ui.colored_label(theme::ACCENT, format!("{} {}", icon, label));
+                            if let Some(kind) = world.kinds.get(&eid) {
+                                ui.colored_label(theme::TEXT_MUTED, format!("Type: {:?}", kind));
+                            }
+                            if let Some(&fid) = world.factions.get(&eid) {
+                                let f_color = crate::colors::faction_color(universe, fid);
+                                let f_name = crate::colors::faction_name(universe, fid);
+                                ui.horizontal(|ui| {
+                                    ui.colored_label(f_color, "●");
+                                    ui.colored_label(theme::TEXT_MUTED, f_name);
+                                });
+                            }
+                            if let Some(&pos) = world.positions.get(&eid) {
+                                ui.colored_label(
+                                    theme::TEXT_MUTED,
+                                    format!("Pos: x {:.1} y {:.1} z {:.1} km", pos.x, pos.y, pos.z),
+                                );
+                            }
+                            let kids = world.children_of(eid);
+                            if !kids.is_empty() {
+                                egui::CollapsingHeader::new(format!("DOCKED ({})", kids.len()))
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        for &cid in kids {
+                                            let (clabel, cicon) = entity_row_label(world, cid);
+                                            if ui.colored_label(theme::TEXT_PRIMARY, format!("{} {}", cicon, clabel)).clicked() {
+                                                entity_clicked = Some(cid);
+                                            }
+                                        }
+                                    });
+                            }
+                        }
+                    } else if let Some(obj) = selected_obj
                         .and_then(|id| sector.static_objects.iter().find(|o| o.id == id))
                     {
+                        // Existing static-object detail block.
                         ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(4.0);
                         ui.colored_label(theme::TEXT_MUTED, "SELECTED");
                         ui.add_space(2.0);
                         ui.colored_label(theme::ACCENT, &obj.name);
-                        ui.add_space(2.0);
-                        ui.colored_label(
-                            theme::TEXT_MUTED,
-                            format!("Type: {}", kind_label(&obj.kind)),
-                        );
-                        ui.add_space(2.0);
+                        ui.colored_label(theme::TEXT_MUTED, format!("Type: {}", kind_label(&obj.kind)));
                         ui.colored_label(
                             theme::TEXT_MUTED,
                             format!(
@@ -101,7 +193,8 @@ impl SectorPanel {
                             ),
                         );
                         if let Some(f) = obj.faction {
-                            ui.colored_label(theme::TEXT_MUTED, format!("Faction #{}", f.0));
+                            let f_name = crate::colors::faction_name(universe, f);
+                            ui.colored_label(theme::TEXT_MUTED, format!("Faction: {}", f_name));
                         }
                         if let Some((pitch, yaw, roll)) = obj.rotation {
                             ui.colored_label(
@@ -114,6 +207,7 @@ impl SectorPanel {
                         }
                     }
                 } else {
+                    // UniverseMap branch — CONNECTIONS list.
                     ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
                     ui.add_space(4.0);
                     let neighbours = universe.neighbour_ids(sector.id);
@@ -148,8 +242,39 @@ impl SectorPanel {
             open_3d_clicked: open_clicked,
             back_to_map_clicked: back_clicked,
             object_clicked,
+            entity_clicked,
+            back_to_parent_clicked,
         }
     }
+}
+
+fn strip_macro(s: &str) -> String {
+    let s = s.to_lowercase();
+    let s = s.strip_suffix("_macro").unwrap_or(&s).to_owned();
+    s.replace('_', " ")
+}
+
+fn entity_row_label(
+    world: &map_domain::world::World,
+    eid: map_domain::world::EntityId,
+) -> (String, &'static str) {
+    use map_domain::world::LiveObjectKind;
+    let icon = match world.kinds.get(&eid) {
+        Some(LiveObjectKind::Station) => "◼",
+        Some(LiveObjectKind::ShipExtraLarge) | Some(LiveObjectKind::ShipLarge) => "▲",
+        _ => "▴",
+    };
+    let code = world.codes.get(&eid).cloned();
+    let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
+    let human = strip_macro(&macro_name);
+
+    let label = match (code, &human) {
+        (Some(c), h) if !h.is_empty() && h != &c => format!("{} — {}", c, h),
+        (Some(c), _) => c,
+        (None, h) if !h.is_empty() => h.clone(),
+        _ => macro_name,
+    };
+    (label, icon)
 }
 
 fn kind_icon(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
@@ -181,5 +306,12 @@ mod tests {
     #[test]
     fn panel_handles_no_selection() {
         let _panel = SectorPanel::default();
+    }
+
+    #[test]
+    fn strip_macro_removes_suffix_and_underscores() {
+        assert_eq!(strip_macro("cluster_709_sector001_macro"), "cluster 709 sector001");
+        assert_eq!(strip_macro("argon_prime_macro"), "argon prime");
+        assert_eq!(strip_macro("no_suffix"), "no suffix");
     }
 }
