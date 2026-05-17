@@ -99,6 +99,36 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     let translations = parse_translations_xml(&translations_str)?;
 
+    // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
+    let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
+        std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/factions.xml") {
+        let text = String::from_utf8_lossy(&data);
+        for (k, v) in crate::faction_parser::parse_factions_xml(&text) {
+            faction_defs.entry(k).or_insert(v); // first occurrence wins (main loads first)
+        }
+    }
+    let mut colors_map: std::collections::HashMap<String, [u8; 4]> =
+        std::collections::HashMap::new();
+    let mut mappings_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/colors.xml") {
+        let text = String::from_utf8_lossy(&data);
+        let (c, m) = crate::faction_parser::parse_colors_xml(&text);
+        for (k, v) in c {
+            colors_map.entry(k).or_insert(v);
+        }
+        for (k, v) in m {
+            mappings_map.entry(k).or_insert(v);
+        }
+    }
+    eprintln!(
+        "[map] Faction defs: {}, colors: {}, mappings: {}",
+        faction_defs.len(),
+        colors_map.len(),
+        mappings_map.len()
+    );
+
     // Group sectors by cluster
     let mut cluster_to_sectors: HashMap<String, Vec<String>> = HashMap::new();
     for (sector_macro, (cluster_macro, _, _)) in &sector_placements {
@@ -442,14 +472,46 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
-    Ok(Universe {
+    let mut universe = Universe {
         sectors,
         clusters,
         connections,
         sector_macros,
         faction_strings: HashMap::new(),
         faction_table: HashMap::new(),
-    })
+    };
+
+    // Assign sequential FactionIds and populate the faction table.
+    let mut next_id: u32 = 1;
+    let mut sorted_keys: Vec<&String> = faction_defs.keys().collect();
+    sorted_keys.sort(); // deterministic id assignment across runs
+    for faction_id_str in sorted_keys {
+        let def = &faction_defs[faction_id_str];
+        let fid = map_domain::ids::FactionId(next_id);
+        next_id += 1;
+        let display_name = translations
+            .get(&def.name_textref)
+            .cloned()
+            .unwrap_or_else(|| faction_id_str.clone());
+        let color = crate::faction_parser::resolve_faction_color(
+            &def.color_mapping,
+            &colors_map,
+            &mappings_map,
+        )
+        .unwrap_or([192, 192, 192, 255]);
+        universe
+            .faction_strings
+            .insert(faction_id_str.clone(), fid);
+        universe
+            .faction_table
+            .insert(fid, map_domain::universe::FactionMeta { display_name, color });
+    }
+    eprintln!(
+        "[map] Built faction table: {} factions",
+        universe.faction_table.len()
+    );
+
+    Ok(universe)
 }
 
 /// galaxy.xml: cluster_macro_name → absolute (x, z) position in metres.
