@@ -69,6 +69,73 @@ pub fn parse_factions_xml(xml: &str) -> HashMap<String, FactionDef> {
     out
 }
 
+/// Parse `libraries/colors.xml`. Returns two maps:
+/// 1. color id → RGBA bytes (e.g. "azure_dark" → [40,100,180,220])
+/// 2. mapping id → color-ref id (e.g. "faction_argon" → "azure_dark")
+pub fn parse_colors_xml(xml: &str) -> (HashMap<String, [u8; 4]>, HashMap<String, String>) {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut colors = HashMap::new();
+    let mut mappings = HashMap::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                match e.name().as_ref() {
+                    b"color" => {
+                        if let Some(id) = attr_str(e, b"id") {
+                            let r = attr_u8(e, b"r").unwrap_or(0);
+                            let g = attr_u8(e, b"g").unwrap_or(0);
+                            let b = attr_u8(e, b"b").unwrap_or(0);
+                            let a = attr_u8(e, b"a").unwrap_or(255);
+                            colors.insert(id, [r, g, b, a]);
+                        }
+                    }
+                    b"mapping" => {
+                        if let (Some(id), Some(rf)) = (attr_str(e, b"id"), attr_str(e, b"ref")) {
+                            mappings.insert(id, rf);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                eprintln!("[map] parse_colors_xml: XML error: {e}");
+                break;
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    (colors, mappings)
+}
+
+/// Resolve a faction's mapping id to its RGBA. None if either the mapping or
+/// the referenced colour entry is absent.
+pub fn resolve_faction_color(
+    mapping_id: &str,
+    colors: &HashMap<String, [u8; 4]>,
+    mappings: &HashMap<String, String>,
+) -> Option<[u8; 4]> {
+    let color_id = mappings.get(mapping_id)?;
+    colors.get(color_id).copied()
+}
+
+fn attr_str(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<String> {
+    e.attributes().filter_map(Result::ok)
+        .find(|a| a.key.as_ref() == name)
+        .and_then(|a| String::from_utf8(a.value.into_owned()).ok())
+}
+
+fn attr_u8(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<u8> {
+    attr_str(e, name)?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +159,26 @@ mod tests {
         let teladi = map.get("teladi").expect("teladi present");
         assert_eq!(teladi.name_textref, (20203, 1801));
         assert_eq!(teladi.color_mapping, "faction_teladi");
+    }
+
+    fn fixture_colors() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/colors_mini.xml"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn parse_colors_resolves_mapping_chain() {
+        let (colors, mappings) = parse_colors_xml(&fixture_colors());
+        assert_eq!(colors.get("azure_dark"), Some(&[40, 100, 180, 220]));
+        assert_eq!(mappings.get("faction_argon"), Some(&"azure_dark".to_string()));
+
+        let resolved = resolve_faction_color("faction_argon", &colors, &mappings);
+        assert_eq!(resolved, Some([40, 100, 180, 220]));
+
+        let missing = resolve_faction_color("faction_unknown", &colors, &mappings);
+        assert_eq!(missing, None);
     }
 }

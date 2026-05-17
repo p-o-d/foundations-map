@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<colormap xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="colors.xsd">
+  <colors>
+    <color id="azure_dark" r="40" g="100" b="180" a="220"/>
+    <color id="yellow_dark" r="180" g="160" b="40" a="220"/>
+    <color id="grey_192" r="192" g="192" b="192" a="255"/>
+  </colors>
+  <mappings>
+    <mapping id="faction_argon" ref="azure_dark"/>
+    <mapping id="faction_teladi" ref="yellow_dark"/>
+    <mapping id="faction_ownerless" ref="grey_192"/>
+  </mappings>
+</colormap>
