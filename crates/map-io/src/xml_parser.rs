@@ -447,6 +447,8 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         clusters,
         connections,
         sector_macros,
+        faction_strings: HashMap::new(),
+        faction_table: HashMap::new(),
     })
 }
 
@@ -1853,6 +1855,8 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         clusters: vec![],
         connections: vec![],
         sector_macros: HashMap::new(),
+        faction_strings: HashMap::new(),
+        faction_table: HashMap::new(),
     })
 }
 
