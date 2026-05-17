@@ -9,6 +9,8 @@ quick-xml = "0.40.0"
 glam = "0.32.1"
 flate2 = "1"
 notify = "8"
+rayon = "1"
+memchr = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56.0"
