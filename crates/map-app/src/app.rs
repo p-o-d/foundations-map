@@ -95,6 +95,7 @@ impl eframe::App for App {
             if let ViewMode::SectorView {
                 sector,
                 selected_obj: Some(_),
+                ..
             } = &self.view_mode
             {
                 let sector = *sector;
@@ -178,6 +179,7 @@ impl eframe::App for App {
                 ViewMode::SectorView {
                     sector,
                     selected_obj,
+                    ..
                 } => {
                     // Compute positions before calling show to avoid double-borrow of self.universe
                     let sec = self.universe.sector(sector);

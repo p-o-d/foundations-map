@@ -472,20 +472,6 @@ fn draw_arrowhead(
     ));
 }
 
-fn faction_color(id: map_domain::ids::FactionId) -> egui::Color32 {
-    const PALETTE: &[(u8, u8, u8)] = &[
-        (59, 130, 246),
-        (34, 197, 94),
-        (168, 85, 247),
-        (249, 115, 22),
-        (20, 184, 166),
-        (239, 68, 68),
-        (234, 179, 8),
-        (236, 72, 153),
-    ];
-    let (r, g, b) = PALETTE[id.0 as usize % PALETTE.len()];
-    egui::Color32::from_rgba_unmultiplied(r, g, b, 230)
-}
 
 fn draw_live_ships(
     painter: &egui::Painter,
@@ -527,12 +513,8 @@ fn draw_live_ships(
             Some(LiveObjectKind::Station) => 16.0,
             None => 4.0,
         };
-        let color = world
-            .factions
-            .get(&eid)
-            .copied()
-            .map(faction_color)
-            .unwrap_or(egui::Color32::from_rgba_unmultiplied(200, 200, 200, 200));
+        // TEMP T15: replaced by GPU draw path
+        let color = egui::Color32::from_rgba_unmultiplied(200, 200, 200, 200);
 
         match kind {
             Some(LiveObjectKind::Station) => {

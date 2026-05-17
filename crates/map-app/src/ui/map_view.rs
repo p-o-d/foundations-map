@@ -24,19 +24,9 @@ fn hex_offset_pixels(index: u32, total: u32, r: f32) -> Vec2 {
     }
 }
 
-fn faction_fill(id: FactionId) -> egui::Color32 {
-    const PALETTE: &[(u8, u8, u8)] = &[
-        (59, 130, 246), // blue
-        (34, 197, 94),  // green
-        (168, 85, 247), // purple
-        (249, 115, 22), // orange
-        (20, 184, 166), // teal
-        (239, 68, 68),  // red
-        (234, 179, 8),  // yellow
-        (236, 72, 153), // pink
-    ];
-    let (r, g, b) = PALETTE[id.0 as usize % PALETTE.len()];
-    egui::Color32::from_rgba_unmultiplied(r, g, b, 60)
+fn faction_fill(universe: &Universe, id: FactionId) -> egui::Color32 {
+    let base = crate::colors::faction_color(universe, id);
+    egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 60)
 }
 
 /// Returns quadratic bezier control point in universe space, or None if straight.
@@ -401,7 +391,7 @@ impl MapView {
             let fill_color = if is_selected {
                 egui::Color32::from_rgba_unmultiplied(124, 58, 237, 80)
             } else if let Some(fid) = sector.faction {
-                faction_fill(fid)
+                faction_fill(universe, fid)
             } else {
                 theme::BG_WIDGET
             };
