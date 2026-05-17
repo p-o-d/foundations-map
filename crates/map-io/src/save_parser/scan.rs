@@ -118,8 +118,9 @@ fn scan_sectors(bytes: &[u8]) -> (FactionOverrides, Vec<SectorChunk>) {
     // sector_start.is_some().
     let mut depth: u32 = 0;
 
-    let open_needle = b"<component";
-    let close_needle = b"</component>";
+    // Trailing space prevents matching `<components>` (plural container tag).
+    let open_needle: &[u8] = b"<component ";
+    let close_needle: &[u8] = b"</component>";
     let close_finder = memmem::Finder::new(close_needle);
     let open_finder = memmem::Finder::new(open_needle);
 
@@ -150,11 +151,14 @@ fn scan_sectors(bytes: &[u8]) -> (FactionOverrides, Vec<SectorChunk>) {
             };
             let tag_end = close_gt + 1;
             let tag = &bytes[event_pos..tag_end];
+            // Self-closing `<component .../>`: emits no `</component>`, so it
+            // contributes zero net depth change.
+            let self_closing = tag.len() >= 2 && tag[tag.len() - 2] == b'/';
 
             if sector_start.is_none() {
                 // Not tracking anything; only care if this is a sector.
                 if let Some(class) = find_attr(tag, b"class") {
-                    if class == b"sector" {
+                    if class == b"sector" && !self_closing {
                         let mac =
                             find_attr(tag, b"macro").map(str_from).unwrap_or_default();
                         let macro_lower = mac.to_lowercase();
@@ -166,7 +170,7 @@ fn scan_sectors(bytes: &[u8]) -> (FactionOverrides, Vec<SectorChunk>) {
                         depth = 1;
                     }
                 }
-            } else {
+            } else if !self_closing {
                 // Already inside a sector — just count nesting depth.
                 depth += 1;
             }

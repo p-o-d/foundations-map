@@ -71,6 +71,9 @@ pub fn parse_save(
         .collect();
     let stage3_ms = t_stage3.elapsed().as_millis();
 
+    let chunk_count = entity_lists.len();
+    let entity_count: usize = entity_lists.iter().map(Vec::len).sum();
+
     // Stage 4: merge.
     let t_stage4 = Instant::now();
     let world = merge::merge(entity_lists, sector_macros);
@@ -78,8 +81,8 @@ pub fn parse_save(
 
     let total_ms = t_total.elapsed().as_millis();
     eprintln!(
-        "[parse] stage1+2={}ms stage3={}ms stage4={}ms total={}ms",
-        stage12_ms, stage3_ms, stage4_ms, total_ms
+        "[parse] stage1+2={}ms stage3={}ms stage4={}ms total={}ms chunks={} entities={}",
+        stage12_ms, stage3_ms, stage4_ms, total_ms, chunk_count, entity_count
     );
 
     Ok((scan_out.meta, world, scan_out.overrides))
