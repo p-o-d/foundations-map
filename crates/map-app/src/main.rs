@@ -1,4 +1,5 @@
 mod app;
+pub mod colors;
 mod renderer;
 mod theme;
 pub mod ui;
