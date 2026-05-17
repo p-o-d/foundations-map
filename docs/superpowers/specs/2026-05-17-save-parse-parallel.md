@@ -24,10 +24,11 @@ Three stages, two layers of parallelism:
 ```
                   ┌────────────────────────────────────────────────────┐
                   │ Stage 1 (thread G)        Stage 2 (caller thread)  │
-                  │ gzip → Vec<u8> chunks ──► tokenize: extract        │
-                  │                              meta + overrides +     │
-                  │                              per-sector byte slices │
-                  │ overlap: max(1.9s, 2s)                              │
+                  │ gzip → Vec<u8> chunks ──► fast byte scan:           │
+                  │                              meta (regex on info)   │
+                  │                              + overrides             │
+                  │                              + per-sector byte ranges│
+                  │ overlap: max(1.9s, ~0.5s) ≈ 1.9s                    │
                   └─────────────────────┬──────────────────────────────┘
                                         │ Arc<Vec<u8>> + Vec<SectorChunk>
                                         ▼
@@ -47,7 +48,7 @@ Three stages, two layers of parallelism:
                   └────────────────────────────────────────────────────┘
 ```
 
-Expected wall: max(1.9, 2.0) + 1.0 + 0.2 ≈ **3.2s** (down from 7.7s).
+Expected wall: max(1.9, 0.5) + 1.0 + 0.2 ≈ **3.1s** (down from 7.7s; gzip is the floor).
 
 ## Stage 1 — gzip producer
 
@@ -72,41 +73,74 @@ fn spawn_decompressor(path: &Path) -> (mpsc::SyncSender<Vec<u8>>, JoinHandle<io:
 }
 ```
 
-Returns a `Receiver<Vec<u8>>` (extracted from the tx); caller wraps in a `ChunkReader` implementing `std::io::Read` that drains chunks, then feeds to `quick_xml::Reader`.
+Returns a `Receiver<Vec<u8>>` (extracted from the tx); caller drains chunks straight into a single growing `accumulated: Vec<u8>` and runs the byte scanner over the tail as new bytes arrive (carry-over handling described in Stage 2).
 
 Backpressure: bounded queue size 32 chunks × 64 KB = 2 MB buffer. Producer blocks when consumer falls behind.
 
-Bonus: Stage 2 needs full decompressed bytes for Stage 3 (per-sector random access). `ChunkReader` has dual role: implement `Read` for quick_xml AND accumulate every byte handed out into an owned `accumulated: Vec<u8>`. After Stage 2 finishes, caller takes the buffer (`reader.into_buffer() -> Vec<u8>`) and passes it to Stage 3 wrapped in `Arc<Vec<u8>>`. Memory peak: ~813 MB.
+The `accumulated: Vec<u8>` becomes the input for Stage 3 (wrapped in `Arc<Vec<u8>>`). Memory peak: ~813 MB.
 
-Crucially, byte positions reported by `quick_xml::Reader::buffer_position()` must match offsets in `accumulated` (they will, because both count bytes consumed from the input stream — chunk boundaries are invisible to the XML reader).
+## Stage 2 — fast byte scanner
 
-## Stage 2 — tokenize, extract slices
+Hand-rolled byte-level scanner over the chunk-fed buffer. Does NOT use quick_xml. Three things to extract:
 
-Single quick_xml pass over the chunk-fed reader. State:
-
-- `comp_depth: u32` — `<component>` nesting depth
-- `sector_open_depth: Option<u32>` + `sector_macro: Option<String>` + `sector_start_pos: usize`
-- `overrides: HashMap<String, String>` — sector → owner
-- `meta: SnapshotMeta` — from `<info>` (existing logic)
-- `chunks: Vec<SectorChunk>` — appended on sector close
+1. `SnapshotMeta` from the `<info>` block
+2. `overrides: HashMap<String, String>` — sector_macro → owner
+3. `chunks: Vec<SectorChunk>` — byte ranges of each `<component class="sector"…>…</component>` subtree
 
 ```rust
 struct SectorChunk {
     sector_macro: String,    // lowercase
-    byte_range: Range<usize>, // into the decompressed buffer
+    byte_range: Range<usize>, // into the accumulated buffer
 }
 ```
 
-When entering a `<component class="sector" macro="…" owner="…">`:
-- `sector_start_pos = reader.buffer_position()`
-- Record macro + owner
+### Algorithm
 
-When leaving (matching `</component>`):
-- `chunks.push(SectorChunk { sector_macro, byte_range: sector_start_pos..reader.buffer_position() })`
+Maintain a cursor `pos` over `accumulated`. As bytes arrive from Stage 1, advance the cursor; carry-over partial-tag state across chunk boundaries by retaining the index of the last `<` we haven't yet matched a closing `>` for.
 
-No entity work in Stage 2. Skip all non-sector class checks (cheap).
+Three patterns to detect via `memchr::memchr(b'<', &buf[pos..])`:
 
-End of Stage 2: have `(meta, overrides, chunks, decompressed_bytes)`.
+- `<component class="sector"…>` — extract `macro="…"` and (optional) `owner="…"` substrings from inside the tag (search `macro=\"` / `owner=\"`, take until next `\"`). Push `(macro_lowercase, owner)` into overrides. Record `sector_start = pos`, `sector_macro = macro_lower`. Increment `comp_depth` to 1.
+- `<component ` (any other class, or any other component nesting inside) — increment `comp_depth`. Don't parse attrs.
+- `</component>` — decrement `comp_depth`. If `comp_depth == 0` and we were inside a sector, emit `SectorChunk { sector_macro, byte_range: sector_start..end_of_tag }` and clear sector state.
+
+For `<info>` extraction: same byte-scan approach, look for one-off needles `<game ` and `<player `, extract `time="…"`, `version="…"`, `build="…"`, `money="…"`, `location="…"`. Stop info scanning once we see `</info>`.
+
+### Implementation note
+
+Use a tiny helper:
+
+```rust
+fn find_attr<'a>(tag: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    // Build needle: b"<name>=\""  but just  name + b"=\""
+    let mut needle = name.to_vec();
+    needle.extend_from_slice(b"=\"");
+    let start = twoway_find(tag, &needle)? + needle.len();
+    let rest = &tag[start..];
+    let end = memchr::memchr(b'"', rest)?;
+    Some(&rest[..end])
+}
+```
+
+(`twoway_find` = the `memchr::memmem::find` two-way matcher; already in the `memchr` crate.)
+
+### Validity assumptions
+
+- X4 saves are machine-generated and well-formed: no XML comments containing literal `<component`, no CDATA sections, no escape sequences inside `class="sector"` tag text, no `<component` tokens inside attribute values.
+- Tag opens always close on the same line region (no embedded newlines mid-attribute that span chunk boundaries within carry-over budget — keep carry-over to a generous 8 KB).
+- If any assumption breaks, scanner produces no chunks for the affected sector → its entities don't load. Single sector lost, not whole parse. We log a warning when `comp_depth` is unbalanced at EOF.
+
+### Output
+
+End of Stage 2: `(meta, overrides, chunks, accumulated_buf)`. No quick_xml objects.
+
+### Why faster
+
+quick_xml's per-event handling: ~6 ns/event × 35 M events ≈ 210 ms minimum overhead, plus our match arms add allocation pressure → ~2 s total. Byte scan with memchr only handles the `<` density (~2.8 M tags), each compared against ≤ 3 fixed needles → expected ~0.5 s on 813 MB.
+
+### New dependency
+
+Add `memchr = "2"` to `crates/map-io/Cargo.toml`.
 
 ## Stage 3 — rayon per-sector
 
@@ -166,24 +200,25 @@ Rename existing `save_parser.rs` to `save_parser/mod.rs`, split into:
 
 ```
 crates/map-io/src/save_parser/
-    mod.rs              — public parse_save (+ backward-compat shim if needed)
-    decompress.rs       — Stage 1 producer + ChunkReader
-    extract.rs          — Stage 2 (meta + overrides + sector chunks)
-    sector_chunk.rs     — Stage 3 worker (parse_sector_chunk)
+    mod.rs              — public parse_save; orchestrates stages
+    decompress.rs       — Stage 1 producer (gzip → mpsc)
+    scan.rs             — Stage 2 byte scanner (meta + overrides + sector chunks)
+    sector_chunk.rs     — Stage 3 worker (parse_sector_chunk uses quick_xml on the small slice)
     merge.rs            — Stage 4 (World assembly)
     types.rs            — SectorChunk, EntityRecord, FactionOverrides
 ```
 
-`mod.rs` orchestrates the four stages, exposes the same `pub fn parse_save(path, sector_macros) -> Result<(SnapshotMeta, World, FactionOverrides), ParseError>`.
+`mod.rs` exposes the same `pub fn parse_save(path, sector_macros) -> Result<(SnapshotMeta, World, FactionOverrides), ParseError>`.
+
+Stage 3 keeps using quick_xml for its per-sector parse — sectors are small (~5 KB each on average), per-sector cost is dominated by allocation not tokenization, and quick_xml's correctness handles whatever odd attribute orderings appear inside.
 
 ## Dependency Changes
 
 Add to `crates/map-io/Cargo.toml`:
 ```toml
 rayon = "1"
+memchr = "2"
 ```
-
-No other new deps.
 
 ## Error Handling
 
@@ -216,15 +251,18 @@ Acceptable on dev machine (32 GB) and target users (8 GB+). For lower-memory mac
 
 - All 53 existing tests still pass.
 - New tests in `save_parser/tests.rs`:
-  - `parse_mini_save_parallel_matches_sequential` — golden test: parse the mini_save fixture, assert same World size + same faction count.
-  - `parse_sector_chunk_extracts_ships_and_stations` — unit test on a hand-crafted sector subtree byte slice.
-  - `decompress_producer_handles_partial_reads` — unit test with a small in-memory gzip stream.
+  - `parse_mini_save_parallel_matches_sequential` — golden: parse the mini_save fixture, assert same World size + same faction count + same SnapshotMeta values as the existing (now-deleted) sequential parser produced (use a baseline saved-in-test as the golden numbers).
+  - `parse_sector_chunk_extracts_ships_and_stations` — unit on a hand-crafted sector subtree byte slice.
+  - `decompress_producer_handles_partial_reads` — unit with a small in-memory gzip stream.
+  - `byte_scanner_finds_all_sector_chunks` — unit on a synthetic XML buffer with 5 nested sectors; assert exact count + byte ranges.
+  - `byte_scanner_extracts_owner_and_macro` — unit on a single `<component class="sector" macro="x" owner="y">…</component>` fragment.
+  - `byte_scanner_handles_chunk_boundary_split_tag` — fuzz-style: split same input at every byte boundary, assert same output. (Tests carry-over correctness.)
 - Smoke benchmark: log wall time of each stage `[parse] stage1=Nms stage2=Nms stage3=Nms stage4=Nms total=Nms` on real save. Should show total < 4000 ms on the user's machine.
 
 ## Acceptance Criteria
 
 - [ ] `cargo test` passes (all 53 + new tests)
-- [ ] Real-save wall time ≤ 4 s on the user's machine (currently 7.7 s)
+- [ ] Real-save wall time ≤ **3.5 s** on the user's machine (currently 7.7 s; target derived from gzip floor 1.9 s + rayon ~1 s + merge ~0.2 s + ~0.4 s margin)
 - [ ] No new compile warnings
 - [ ] Peak RAM during parse ≤ 1.2 GB (measured loosely; not enforced)
 - [ ] Same World contents as the sequential parser for the same input (mini_save fixture and real save spot-check via `world.names.len()`)
