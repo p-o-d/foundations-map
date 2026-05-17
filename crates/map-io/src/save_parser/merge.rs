@@ -34,7 +34,7 @@ pub fn merge(
                     id
                 })
             });
-            world.insert_entity(r.id, r.name, r.kind, faction, r.position, sec_id);
+            world.insert_entity(r.id, r.macro_name, r.kind, faction, r.position, sec_id);
         }
     }
 
@@ -55,7 +55,9 @@ mod tests {
         let records = vec![
             EntityRecord {
                 id: 0x10,
-                name: "station_a".into(),
+                parent_id: None,
+                macro_name: "station_a".into(),
+                code: None,
                 kind: LiveObjectKind::Station,
                 owner: Some("argon".into()),
                 position: glam::Vec3::ZERO,
@@ -63,7 +65,9 @@ mod tests {
             },
             EntityRecord {
                 id: 0x11,
-                name: "ship_a".into(),
+                parent_id: None,
+                macro_name: "ship_a".into(),
+                code: None,
                 kind: LiveObjectKind::ShipSmall,
                 owner: Some("argon".into()),
                 position: glam::Vec3::ZERO,
@@ -71,7 +75,9 @@ mod tests {
             },
             EntityRecord {
                 id: 0x12,
-                name: "ship_b".into(),
+                parent_id: None,
+                macro_name: "ship_b".into(),
+                code: None,
                 kind: LiveObjectKind::ShipMedium,
                 owner: Some("teladi".into()),
                 position: glam::Vec3::ZERO,
@@ -97,7 +103,9 @@ mod tests {
     fn unknown_sector_drops_entity() {
         let records = vec![EntityRecord {
             id: 0xFFFF,
-            name: "x".into(),
+            parent_id: None,
+            macro_name: "x".into(),
+            code: None,
             kind: LiveObjectKind::ShipSmall,
             owner: None,
             position: glam::Vec3::ZERO,
@@ -112,7 +120,9 @@ mod tests {
     fn no_sector_macros_drops_all() {
         let records = vec![EntityRecord {
             id: 1,
-            name: "x".into(),
+            parent_id: None,
+            macro_name: "x".into(),
+            code: None,
             kind: LiveObjectKind::Station,
             owner: None,
             position: glam::Vec3::ZERO,

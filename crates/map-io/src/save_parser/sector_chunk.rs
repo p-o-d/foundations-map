@@ -43,7 +43,9 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                         let p = pending.take().unwrap();
                         out.push(EntityRecord {
                             id: p.id,
-                            name: p.name,
+                            parent_id: None,
+                            macro_name: p.macro_name,
+                            code: None,
                             kind: p.kind,
                             owner: p.owner,
                             position: p.position.unwrap_or(Vec3::ZERO),
@@ -87,7 +89,7 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
 struct Pending {
     open_depth: u32,
     id: u32,
-    name: String,
+    macro_name: String,
     kind: LiveObjectKind,
     owner: Option<String>,
     position: Option<Vec3>,
@@ -105,13 +107,13 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, _sector_macro: &str) -> Option<
     };
     let id_str = attr_str(e, b"id")?;
     let id = parse_entity_id(&id_str)?;
-    let name = attr_str(e, b"macro").unwrap_or_else(|| class.clone());
+    let macro_name = attr_str(e, b"macro").unwrap_or_else(|| class.clone());
     let owner = attr_str(e, b"owner");
 
     Some(Pending {
         open_depth: depth,
         id,
-        name,
+        macro_name,
         kind,
         owner,
         position: None,
