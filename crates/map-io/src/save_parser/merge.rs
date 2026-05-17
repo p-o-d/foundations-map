@@ -34,7 +34,7 @@ pub fn merge(
                     id
                 })
             });
-            world.insert_entity(r.id, r.macro_name, r.kind, faction, r.position, sec_id);
+            world.insert_entity(r.id, r.macro_name, r.kind, faction, r.position, sec_id, None, None);
         }
     }
 
