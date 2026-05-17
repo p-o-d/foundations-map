@@ -262,6 +262,7 @@ fn entity_row_label(
     let icon = match world.kinds.get(&eid) {
         Some(LiveObjectKind::Station) => "◼",
         Some(LiveObjectKind::ShipExtraLarge) | Some(LiveObjectKind::ShipLarge) => "▲",
+        Some(LiveObjectKind::ShipMedium) => "▶",
         _ => "▴",
     };
     let code = world.codes.get(&eid).cloned();
