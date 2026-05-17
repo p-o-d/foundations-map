@@ -1,4 +1,5 @@
 use crate::ids::{ObjectId, SectorId};
+use crate::world::EntityId;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewMode {
@@ -8,6 +9,7 @@ pub enum ViewMode {
     SectorView {
         sector: SectorId,
         selected_obj: Option<ObjectId>,
+        selected_entity: Option<EntityId>,
     },
 }
 
@@ -34,6 +36,7 @@ impl ViewMode {
             } => ViewMode::SectorView {
                 sector,
                 selected_obj: None,
+                selected_entity: None,
             },
             other => other, // no-op if no sector selected
         }
@@ -53,6 +56,18 @@ impl ViewMode {
             ViewMode::SectorView { sector, .. } => ViewMode::SectorView {
                 sector,
                 selected_obj: Some(obj),
+                selected_entity: None,
+            },
+            other => other,
+        }
+    }
+
+    pub fn select_entity(self, eid: EntityId) -> Self {
+        match self {
+            ViewMode::SectorView { sector, .. } => ViewMode::SectorView {
+                sector,
+                selected_obj: None,
+                selected_entity: Some(eid),
             },
             other => other,
         }
@@ -60,11 +75,38 @@ impl ViewMode {
 
     pub fn deselect_object(self) -> Self {
         match self {
-            ViewMode::SectorView { sector, .. } => ViewMode::SectorView {
+            ViewMode::SectorView {
+                sector,
+                selected_entity,
+                ..
+            } => ViewMode::SectorView {
                 sector,
                 selected_obj: None,
+                selected_entity,
             },
             other => other,
+        }
+    }
+
+    pub fn deselect_entity(self) -> Self {
+        match self {
+            ViewMode::SectorView {
+                sector,
+                selected_obj,
+                ..
+            } => ViewMode::SectorView {
+                sector,
+                selected_obj,
+                selected_entity: None,
+            },
+            other => other,
+        }
+    }
+
+    pub fn selected_entity(&self) -> Option<EntityId> {
+        match self {
+            ViewMode::SectorView { selected_entity, .. } => *selected_entity,
+            _ => None,
         }
     }
 
@@ -114,7 +156,8 @@ mod tests {
             v,
             ViewMode::SectorView {
                 sector: SectorId(5),
-                selected_obj: None
+                selected_obj: None,
+                selected_entity: None,
             }
         );
     }
@@ -143,7 +186,8 @@ mod tests {
             v,
             ViewMode::SectorView {
                 sector: SectorId(5),
-                selected_obj: Some(ObjectId(42))
+                selected_obj: Some(ObjectId(42)),
+                selected_entity: None,
             }
         );
     }
@@ -159,7 +203,8 @@ mod tests {
             v,
             ViewMode::SectorView {
                 sector: SectorId(5),
-                selected_obj: None
+                selected_obj: None,
+                selected_entity: None,
             }
         );
     }
@@ -174,7 +219,29 @@ mod tests {
         let view = ViewMode::SectorView {
             sector: SectorId(3),
             selected_obj: None,
+            selected_entity: None,
         };
         assert_eq!(view.selected_sector(), Some(SectorId(3)));
+    }
+
+    #[test]
+    fn select_entity_clears_selected_obj() {
+        let v = ViewMode::SectorView {
+            sector: SectorId(1),
+            selected_obj: Some(ObjectId(99)),
+            selected_entity: None,
+        };
+        let v = v.select_entity(42_u32);
+        match v {
+            ViewMode::SectorView {
+                selected_obj,
+                selected_entity,
+                ..
+            } => {
+                assert_eq!(selected_obj, None);
+                assert_eq!(selected_entity, Some(42));
+            }
+            _ => panic!(),
+        }
     }
 }
