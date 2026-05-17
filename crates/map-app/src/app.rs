@@ -128,6 +128,8 @@ impl eframe::App for App {
             crate::spawn_save_parse(
                 self.snapshot_tx.clone(),
                 self.universe.sector_macros.clone(),
+                self.universe.faction_strings.clone(),
+                (self.universe.faction_strings.len() as u32) + 1,
             );
         }
 
