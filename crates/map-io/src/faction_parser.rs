@@ -181,4 +181,15 @@ mod tests {
         let missing = resolve_faction_color("faction_unknown", &colors, &mappings);
         assert_eq!(missing, None);
     }
+
+    #[test]
+    fn resolve_faction_color_handles_dangling_mapping() {
+        let mut colors: std::collections::HashMap<String, [u8; 4]> = std::collections::HashMap::new();
+        colors.insert("real_color".into(), [1, 2, 3, 4]);
+        let mut mappings: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        mappings.insert("faction_x".into(), "missing_color".into());
+
+        // Mapping exists but its ref points to a colour not in the colors map.
+        assert_eq!(resolve_faction_color("faction_x", &colors, &mappings), None);
+    }
 }
