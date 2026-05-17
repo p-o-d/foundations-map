@@ -1871,6 +1871,7 @@ dependencies = [
  "notify",
  "quick-xml 0.40.0",
  "rayon",
+ "tempfile",
  "winreg",
 ]
 
