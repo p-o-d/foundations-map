@@ -21,7 +21,10 @@ struct VOut { @builtin(position) clip: vec4<f32>, @location(0) col: vec4<f32> }
 "#;
 
 const UNIFORM_STRIDE: u64 = 256;
-const MAX_OBJECTS: u64 = 128;
+// 2048 × 256-byte stride = 512 KB uniform buffer. WebGPU baseline guarantees
+// 64 KB; modern desktops give 1 MB+. If we ship to lower-spec hardware, chunk
+// the draw passes instead of one giant buffer.
+const MAX_OBJECTS: u64 = 2048;
 
 pub struct GpuMesh {
     pub vertex_buf: wgpu::Buffer,
@@ -189,6 +192,12 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let Some(scene) = callback_resources.get::<GpuScene>() else {
             return vec![];
         };
+        if self.draw_calls.len() > MAX_OBJECTS as usize {
+            eprintln!(
+                "[render] WARNING: scene has {} draw calls but GPU cap is {}; truncating",
+                self.draw_calls.len(), MAX_OBJECTS
+            );
+        }
         let n = self.draw_calls.len().min(MAX_OBJECTS as usize);
         if n == 0 {
             return vec![];
