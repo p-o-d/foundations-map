@@ -12,6 +12,38 @@ pub struct FactionDef {
     pub color_mapping: String,
 }
 
+/// Parse a `{pageId,textId}` translation reference string.
+fn parse_textref(s: &str) -> Option<(u32, u32)> {
+    // Format: "{20203,201}" or "{20203, 201}".
+    let inner = s.trim().strip_prefix('{')?.strip_suffix('}')?;
+    let mut parts = inner.split(',');
+    let p = parts.next()?.trim().parse().ok()?;
+    let t = parts.next()?.trim().parse().ok()?;
+    Some((p, t))
+}
+
+/// Extract a single `<faction …/>` element into `out`.
+fn handle_faction(
+    e: &quick_xml::events::BytesStart<'_>,
+    out: &mut HashMap<String, FactionDef>,
+) {
+    let mut id_opt: Option<String> = None;
+    let mut name_opt: Option<(u32, u32)> = None;
+    for attr in e.attributes().filter_map(Result::ok) {
+        let key = attr.key.as_ref();
+        let val = String::from_utf8_lossy(&attr.value).into_owned();
+        match key {
+            b"id" => id_opt = Some(val.to_lowercase()),
+            b"name" => name_opt = parse_textref(&val),
+            _ => {}
+        }
+    }
+    if let (Some(id), Some(textref)) = (id_opt, name_opt) {
+        let color_mapping = format!("faction_{}", id);
+        out.insert(id, FactionDef { name_textref: textref, color_mapping });
+    }
+}
+
 /// Parse the XML body of a `libraries/factions.xml` file and return a map of
 /// lowercase faction-id → FactionDef.
 pub fn parse_factions_xml(xml: &str) -> HashMap<String, FactionDef> {
@@ -23,43 +55,13 @@ pub fn parse_factions_xml(xml: &str) -> HashMap<String, FactionDef> {
     let mut buf = Vec::new();
     let mut out = HashMap::new();
 
-    fn parse_textref(s: &str) -> Option<(u32, u32)> {
-        // Format: "{20203,201}" or "{20203, 201}".
-        let inner = s.trim().strip_prefix('{')?.strip_suffix('}')?;
-        let mut parts = inner.split(',');
-        let p = parts.next()?.trim().parse().ok()?;
-        let t = parts.next()?.trim().parse().ok()?;
-        Some((p, t))
-    }
-
-    fn handle_faction(
-        e: &quick_xml::events::BytesStart<'_>,
-        out: &mut HashMap<String, FactionDef>,
-    ) {
-        let mut id_opt: Option<String> = None;
-        let mut name_opt: Option<(u32, u32)> = None;
-        for attr in e.attributes().filter_map(Result::ok) {
-            let key = attr.key.as_ref();
-            let val = String::from_utf8_lossy(&attr.value).into_owned();
-            match key {
-                b"id" => id_opt = Some(val.to_lowercase()),
-                b"name" => name_opt = parse_textref(&val),
-                _ => {}
-            }
-        }
-        if let (Some(id), Some(textref)) = (id_opt, name_opt) {
-            let color_mapping = format!("faction_{}", id);
-            out.insert(id, FactionDef { name_textref: textref, color_mapping });
-        }
-    }
-
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"faction" => {
                 handle_faction(e, &mut out);
             }
             Ok(Event::Eof) => break,
-            Err(_) => break,
+            Err(e) => { eprintln!("[map] parse_factions_xml: XML error: {e}"); break; }
             _ => {}
         }
         buf.clear();
