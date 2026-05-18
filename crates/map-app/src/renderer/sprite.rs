@@ -361,7 +361,7 @@ impl SpritePipeline {
     pub fn draw(&self, rpass: &mut wgpu::RenderPass<'_>, n_instances: u32) {
         if n_instances == 0 { return; }
         rpass.set_pipeline(&self.pipeline);
-        rpass.set_bind_group(0, &self.bind_group, &[]);
+        rpass.set_bind_group(0, Some(&self.bind_group), &[]);
         rpass.set_vertex_buffer(0, self.quad_vb.slice(..));
         rpass.set_vertex_buffer(
             1,

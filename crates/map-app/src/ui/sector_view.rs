@@ -108,7 +108,12 @@ impl SectorView3D {
         // Push wgpu paint callback for the 3D view rect
         let cb = eframe::egui_wgpu::Callback::new_paint_callback(
             view_rect,
-            SceneCallback { draw_calls },
+            SceneCallback {
+                draw_calls,
+                view_proj: Mat4::IDENTITY,
+                viewport: [view_rect.width(), view_rect.height()],
+                sprite_instances: Vec::new(),
+            },
         );
         ui.painter().add(cb);
 
