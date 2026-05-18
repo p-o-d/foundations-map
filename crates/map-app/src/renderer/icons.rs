@@ -200,11 +200,59 @@ fn ellipse_filled(p: &Painter, center: Pos2, rx: f32, ry: f32, col: Color32) {
     p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
 }
 
-// stubs — filled in by Task 5 + Task 6
-fn glyph_capital(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
-fn glyph_medium(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
-fn glyph_small(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
-fn glyph_transport(_p: &Painter, _c: Pos2, _s: f32, _col: Color32, _div: Color32) {}
+// Ship glyphs — Task 5
+fn glyph_capital(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // 3 vertical tally bars
+    for dx in [-3.5_f32, 0.0, 3.5] {
+        let r = Rect::from_center_size(
+            Pos2::new(c.x + dx * s, c.y),
+            Vec2::new(2.0 * s, 10.0 * s),
+        );
+        p.rect_filled(r, 0.0, col);
+    }
+}
+
+fn glyph_medium(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // 2 vertical tally bars
+    for dx in [-2.0_f32, 2.0] {
+        let r = Rect::from_center_size(
+            Pos2::new(c.x + dx * s, c.y),
+            Vec2::new(2.0 * s, 10.0 * s),
+        );
+        p.rect_filled(r, 0.0, col);
+    }
+}
+
+fn glyph_small(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // 1 vertical tally bar
+    let r = Rect::from_center_size(c, Vec2::new(2.0 * s, 10.0 * s));
+    p.rect_filled(r, 0.0, col);
+}
+
+fn glyph_transport(p: &Painter, c: Pos2, s: f32, col: Color32, div: Color32) {
+    // 2 stacked horizontal containers + faction-coloured dividers
+    let top = Rect::from_min_size(
+        Pos2::new(c.x - 7.0 * s, c.y - 5.0 * s),
+        Vec2::new(14.0 * s, 3.5 * s),
+    );
+    let bot = Rect::from_min_size(
+        Pos2::new(c.x - 7.0 * s, c.y + 1.0 * s),
+        Vec2::new(14.0 * s, 3.5 * s),
+    );
+    p.rect_filled(top, 0.0, col);
+    p.rect_filled(bot, 0.0, col);
+    let div_stroke = Stroke::new(0.8 * s, div);
+    p.line_segment(
+        [Pos2::new(c.x, c.y - 5.0 * s), Pos2::new(c.x, c.y - 1.5 * s)],
+        div_stroke,
+    );
+    p.line_segment(
+        [Pos2::new(c.x, c.y + 1.0 * s), Pos2::new(c.x, c.y + 4.5 * s)],
+        div_stroke,
+    );
+}
+
+// stubs — filled in by Task 6
 fn glyph_anomaly(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
 fn glyph_resource_zone(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
 
