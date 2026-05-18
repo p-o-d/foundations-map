@@ -253,6 +253,13 @@ pub fn apply_faction_overrides(universe: &mut Universe, overrides: &FactionOverr
     eprintln!("[map] Applied {} sector faction overrides", applied);
 }
 
+/// Note: `faction_strings` is moved into the spawned thread; any new faction
+/// IDs minted during parse stay inside that thread's clone and are never
+/// propagated back to the watcher's snapshot. In practice X4 saves always
+/// reference the canonical factions already loaded from `libraries/factions.xml`,
+/// so this is a non-issue today. If mods introduce save-only factions, those
+/// would get re-minted on every reparse (cosmetic: same name, different ID).
+///
 /// Spawn a fresh background save-parse, sending its result down `tx`. Called
 /// from the UI when the user clicks Refresh.
 pub fn spawn_save_parse(

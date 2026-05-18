@@ -88,21 +88,6 @@ impl ViewMode {
         }
     }
 
-    pub fn deselect_entity(self) -> Self {
-        match self {
-            ViewMode::SectorView {
-                sector,
-                selected_obj,
-                ..
-            } => ViewMode::SectorView {
-                sector,
-                selected_obj,
-                selected_entity: None,
-            },
-            other => other,
-        }
-    }
-
     pub fn selected_object(&self) -> Option<ObjectId> {
         match self {
             ViewMode::SectorView { selected_obj, .. } => *selected_obj,

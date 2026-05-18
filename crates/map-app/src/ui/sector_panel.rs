@@ -49,7 +49,12 @@ impl SectorPanel {
         ui.add_space(2.0);
         ui.colored_label(theme::TEXT_PRIMARY, &sector.name);
         if let Some(faction_id) = sector.faction {
-            ui.colored_label(theme::ACCENT, format!("Faction #{}", faction_id.0));
+            let f_color = crate::colors::faction_color(universe, faction_id);
+            let f_name = crate::colors::faction_name(universe, faction_id);
+            ui.horizontal(|ui| {
+                ui.colored_label(f_color, "●");
+                ui.colored_label(theme::ACCENT, f_name);
+            });
         }
 
         ui.add_space(8.0);
@@ -248,12 +253,6 @@ impl SectorPanel {
     }
 }
 
-fn strip_macro(s: &str) -> String {
-    let s = s.to_lowercase();
-    let s = s.strip_suffix("_macro").unwrap_or(&s).to_owned();
-    s.replace('_', " ")
-}
-
 fn entity_row_label(
     world: &map_domain::world::World,
     eid: map_domain::world::EntityId,
@@ -267,7 +266,7 @@ fn entity_row_label(
     };
     let code = world.codes.get(&eid).cloned();
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
-    let human = strip_macro(&macro_name);
+    let human = crate::colors::strip_macro(&macro_name);
 
     let label = match (code, &human) {
         (Some(c), h) if !h.is_empty() && h != &c => format!("{} — {}", c, h),
@@ -311,8 +310,8 @@ mod tests {
 
     #[test]
     fn strip_macro_removes_suffix_and_underscores() {
-        assert_eq!(strip_macro("cluster_709_sector001_macro"), "cluster 709 sector001");
-        assert_eq!(strip_macro("argon_prime_macro"), "argon prime");
-        assert_eq!(strip_macro("no_suffix"), "no suffix");
+        assert_eq!(crate::colors::strip_macro("cluster_709_sector001_macro"), "cluster 709 sector001");
+        assert_eq!(crate::colors::strip_macro("argon_prime_macro"), "argon prime");
+        assert_eq!(crate::colors::strip_macro("no_suffix"), "no suffix");
     }
 }

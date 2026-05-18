@@ -16,7 +16,6 @@ pub enum ClickedTarget {
 pub struct SectorViewResponse {
     pub close_clicked: bool,
     pub clicked: Option<ClickedTarget>,
-    pub hovered: Option<ClickedTarget>,
 }
 
 #[derive(Default)]
@@ -148,7 +147,6 @@ impl SectorView3D {
         SectorViewResponse {
             close_clicked,
             clicked,
-            hovered,
         }
     }
 }
@@ -448,11 +446,7 @@ fn draw_hover_label(
             if let Some(world) = world {
                 let code = world.codes.get(&eid).cloned();
                 let macro_name = world.names.get(&eid).cloned();
-                let human = macro_name.as_deref().map(|m| {
-                    let s = m.to_lowercase();
-                    let s = s.strip_suffix("_macro").unwrap_or(&s).to_owned();
-                    s.replace('_', " ")
-                });
+                let human = macro_name.as_deref().map(crate::colors::strip_macro);
                 if let Some(c) = &code {
                     lines.push((c.clone(), crate::theme::ACCENT));
                 }
