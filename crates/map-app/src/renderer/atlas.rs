@@ -25,6 +25,36 @@ pub enum IconId {
     ResourceZone,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SuperCategory {
+    Station,
+    Ship,
+    Static,
+}
+
+impl IconId {
+    pub fn super_category(self) -> SuperCategory {
+        match self {
+            IconId::Factory
+            | IconId::WharfShipyard
+            | IconId::Defense
+            | IconId::Trading
+            | IconId::EquipDock
+            | IconId::HQ
+            | IconId::PlayerStation
+            | IconId::GenericStation => SuperCategory::Station,
+
+            IconId::Capital
+            | IconId::Medium
+            | IconId::Small
+            | IconId::Transport => SuperCategory::Ship,
+
+            IconId::Anomaly
+            | IconId::ResourceZone => SuperCategory::Static,
+        }
+    }
+}
+
 const GLYPHS: &[(IconId, char)] = &[
     (IconId::Factory,        '⚙'),
     (IconId::WharfShipyard,  '⎈'),
@@ -127,5 +157,29 @@ mod tests {
     fn classify_static_returns_none_for_gates_and_highways() {
         assert_eq!(classify_static(&StaticObjectKind::Gate), None);
         assert_eq!(classify_static(&StaticObjectKind::Highway), None);
+    }
+
+    #[test]
+    fn super_category_station_variants() {
+        for v in [
+            IconId::Factory, IconId::WharfShipyard, IconId::Defense, IconId::Trading,
+            IconId::EquipDock, IconId::HQ, IconId::PlayerStation, IconId::GenericStation,
+        ] {
+            assert_eq!(v.super_category(), SuperCategory::Station, "{:?}", v);
+        }
+    }
+
+    #[test]
+    fn super_category_ship_variants() {
+        for v in [IconId::Capital, IconId::Medium, IconId::Small, IconId::Transport] {
+            assert_eq!(v.super_category(), SuperCategory::Ship, "{:?}", v);
+        }
+    }
+
+    #[test]
+    fn super_category_static_variants() {
+        for v in [IconId::Anomaly, IconId::ResourceZone] {
+            assert_eq!(v.super_category(), SuperCategory::Static, "{:?}", v);
+        }
     }
 }
