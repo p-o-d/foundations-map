@@ -47,7 +47,10 @@ pub struct GpuScene {
 }
 
 impl GpuScene {
-    pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("3d_scene"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SRC.into()),
@@ -189,7 +192,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let Some(scene) = callback_resources.get::<GpuScene>() else {
+        let Some(scene) = callback_resources.get_mut::<GpuScene>() else {
             return vec![];
         };
         if self.draw_calls.len() > MAX_OBJECTS as usize {
@@ -199,20 +202,19 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             );
         }
         let n = self.draw_calls.len().min(MAX_OBJECTS as usize);
-        if n == 0 {
-            return vec![];
+        if n > 0 {
+            let mut buf = vec![0u8; n * UNIFORM_STRIDE as usize];
+            for (i, dc) in self.draw_calls[..n].iter().enumerate() {
+                let offset = i * UNIFORM_STRIDE as usize;
+                let mvp: [[f32; 4]; 4] = dc.mvp.to_cols_array_2d();
+                let mvp_bytes: &[u8; 64] = bytemuck::cast_ref(&mvp);
+                buf[offset..offset + 64].copy_from_slice(mvp_bytes);
+                let col_bytes: &[u8; 16] = bytemuck::cast_ref(&dc.color);
+                buf[offset + 64..offset + 80].copy_from_slice(col_bytes);
+            }
+            queue.write_buffer(&scene.uniform_buf, 0, &buf);
         }
 
-        let mut buf = vec![0u8; n * UNIFORM_STRIDE as usize];
-        for (i, dc) in self.draw_calls[..n].iter().enumerate() {
-            let offset = i * UNIFORM_STRIDE as usize;
-            let mvp: [[f32; 4]; 4] = dc.mvp.to_cols_array_2d();
-            let mvp_bytes: &[u8; 64] = bytemuck::cast_ref(&mvp);
-            buf[offset..offset + 64].copy_from_slice(mvp_bytes);
-            let col_bytes: &[u8; 16] = bytemuck::cast_ref(&dc.color);
-            buf[offset + 64..offset + 80].copy_from_slice(col_bytes);
-        }
-        queue.write_buffer(&scene.uniform_buf, 0, &buf);
         vec![]
     }
 

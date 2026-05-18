@@ -1,8 +1,8 @@
 use crate::renderer::camera::OrbitCamera;
-use crate::renderer::gpu::{DrawCall, MeshKind, SceneCallback};
+use crate::renderer::gpu::{DrawCall, SceneCallback};
 use crate::theme;
 use egui::{Pos2, Rect, Sense, Vec2};
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 use map_domain::ids::ObjectId;
 use map_domain::objects::StaticObjectKind;
 use map_domain::universe::Sector;
@@ -105,7 +105,8 @@ impl SectorView3D {
             })
             .collect();
 
-        // Push wgpu paint callback for the 3D view rect
+        // Push wgpu paint callback for the 3D view rect (mesh pipeline only;
+        // sprite path retired in favour of painter-based icon rendering below).
         let cb = eframe::egui_wgpu::Callback::new_paint_callback(
             view_rect,
             SceneCallback { draw_calls },
@@ -119,6 +120,20 @@ impl SectorView3D {
 
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
         draw_axis_arrows(ui.painter(), view_rect, camera);
+
+        // Screen-space icon overlay (stations + live entities).
+        if let Some(sec) = sector {
+            draw_icons_2d(
+                ui.painter(),
+                view_rect,
+                camera,
+                sec,
+                world,
+                universe,
+                selected_obj,
+                selected_entity,
+            );
+        }
 
         // Click + hover detection — unified across static + live targets.
         let mut clicked: Option<ClickedTarget> = None;
@@ -153,116 +168,136 @@ impl SectorView3D {
 
 /// Build per-object draw calls with model matrix (translate + scale) and color.
 fn build_draw_calls(
+    _sector: &Sector,
+    _world: Option<&map_domain::world::World>,
+    _universe: &map_domain::universe::Universe,
+    _selected_obj: Option<ObjectId>,
+    _selected_entity: Option<map_domain::world::EntityId>,
+) -> Vec<DrawCall> {
+    // Sprites now own all entity rendering (built in build_sprite_instances).
+    // Gates + highways render through draw_gates_2d. Mesh pipeline is currently
+    // idle; kept in place for potential future grid / ground-plane work.
+    Vec::new()
+}
+
+fn is_station_icon(icon: crate::renderer::atlas::IconId) -> bool {
+    use crate::renderer::atlas::IconId;
+    matches!(
+        icon,
+        IconId::Factory
+            | IconId::WharfShipyard
+            | IconId::Defense
+            | IconId::Trading
+            | IconId::EquipDock
+            | IconId::HQ
+            | IconId::PlayerStation
+            | IconId::GenericStation
+    )
+}
+
+/// Project each entity (static objects + live ships/stations) to screen space
+/// and paint a ring + glyph at the result. Pure 2D-over-3D — guaranteed
+/// constant pixel size regardless of camera distance.
+fn draw_icons_2d(
+    painter: &egui::Painter,
+    view_rect: egui::Rect,
+    camera: &OrbitCamera,
     sector: &Sector,
     world: Option<&map_domain::world::World>,
     universe: &map_domain::universe::Universe,
     selected_obj: Option<ObjectId>,
     selected_entity: Option<map_domain::world::EntityId>,
-) -> Vec<DrawCall> {
-    let mut calls: Vec<DrawCall> = Vec::new();
+) {
+    use crate::renderer::atlas::{classify_live, classify_static, icon_char};
 
-    // Static objects (existing path; excludes gates + highways which render in 2D).
-    for obj in &sector.static_objects {
-        if matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway) {
-            continue;
-        }
-        let scale = match obj.kind {
-            StaticObjectKind::Station => 3.0,
-            StaticObjectKind::Gate => 4.0,
-            StaticObjectKind::ResourceZone => 8.0,
-            StaticObjectKind::Anomaly => 2.0,
-            StaticObjectKind::Highway => 4.0,
-        };
-        let mesh = match obj.kind {
-            StaticObjectKind::Station => MeshKind::Box,
-            StaticObjectKind::Gate => MeshKind::Ring,
-            StaticObjectKind::ResourceZone => MeshKind::Sphere,
-            StaticObjectKind::Anomaly => MeshKind::Sphere,
-            StaticObjectKind::Highway => MeshKind::Ring,
-        };
-        let color = if selected_obj == Some(obj.id) {
-            [1.0, 0.8, 0.1, 1.0]
+    let aspect = view_rect.width() / view_rect.height().max(1.0);
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
+
+    let project = |w_pos: Vec3| -> Option<Pos2> {
+        let clip = vp * w_pos.extend(1.0);
+        if clip.w <= 0.0 { return None; }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        Some(Pos2::new(
+            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
+        ))
+    };
+
+    // Stations: square ring at this half-extent. Ships: circle ring at the smaller radius.
+    const STATION_HALF_NORMAL: f32 = 14.0;
+    const STATION_HALF_SELECTED: f32 = 18.0;
+    const SHIP_RADIUS_NORMAL: f32 = 10.0;
+    const SHIP_RADIUS_SELECTED: f32 = 13.0;
+    const RING_THICKNESS_NORMAL: f32 = 2.0;
+    const RING_THICKNESS_SELECTED: f32 = 3.0;
+    const GLYPH_FONT_PX: f32 = 18.0;
+    const GLYPH_FONT_PX_SELECTED: f32 = 22.0;
+    let selection_color = egui::Color32::from_rgb(255, 217, 25);
+
+    let emit = |screen: Pos2, icon: crate::renderer::atlas::IconId, ring: egui::Color32, selected: bool| {
+        let thickness = if selected { RING_THICKNESS_SELECTED } else { RING_THICKNESS_NORMAL };
+        let ring_color = if selected { selection_color } else { ring };
+        let font_px = if selected { GLYPH_FONT_PX_SELECTED } else { GLYPH_FONT_PX };
+
+        if is_station_icon(icon) {
+            let half = if selected { STATION_HALF_SELECTED } else { STATION_HALF_NORMAL };
+            let rect = egui::Rect::from_center_size(screen, egui::Vec2::splat(half * 2.0));
+            painter.rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(thickness, ring_color),
+                egui::StrokeKind::Outside,
+            );
         } else {
-            kind_color(&obj.kind)
-        };
-        let rotation = obj
-            .rotation
-            .map(|(p, y, r)| {
-                Mat4::from_euler(
-                    glam::EulerRot::YXZ,
-                    y.to_radians(),
-                    p.to_radians(),
-                    r.to_radians(),
-                )
-            })
-            .unwrap_or(Mat4::IDENTITY);
-        let model =
-            Mat4::from_translation(obj.position) * rotation * Mat4::from_scale(Vec3::splat(scale));
-        calls.push(DrawCall {
-            kind: mesh,
-            mvp: model,
-            color,
-        });
+            let radius = if selected { SHIP_RADIUS_SELECTED } else { SHIP_RADIUS_NORMAL };
+            painter.circle_stroke(screen, radius, egui::Stroke::new(thickness, ring_color));
+        }
+
+        let glyph: String = std::iter::once(icon_char(icon)).collect();
+        painter.text(
+            screen,
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            egui::FontId::proportional(font_px),
+            egui::Color32::WHITE,
+        );
+    };
+
+    // Static objects.
+    for obj in &sector.static_objects {
+        let Some(icon) = classify_static(&obj.kind) else { continue };
+        let Some(screen) = project(obj.position) else { continue };
+        let ring = obj.faction
+            .map(|f| crate::colors::faction_color(universe, f))
+            .unwrap_or(crate::theme::TEXT_MUTED);
+        emit(screen, icon, ring, selected_obj == Some(obj.id));
     }
 
-    // Live entities: top-level only (parent.is_none()).
+    // Live entities (top-level only).
     if let Some(world) = world {
-        use map_domain::world::LiveObjectKind;
+        let mut fid_to_str: std::collections::HashMap<map_domain::ids::FactionId, &str> =
+            std::collections::HashMap::new();
+        for (k, v) in &universe.faction_strings {
+            fid_to_str.insert(*v, k.as_str());
+        }
         for &eid in world.entities_in_sector(sector.id) {
-            if world.parent_of(eid).is_some() {
-                continue; // docked / subordinate — invisible in scene, listed in panel
-            }
-            let Some(&pos) = world.positions.get(&eid) else {
-                continue;
-            };
-            let kind = world.kinds.get(&eid);
-            let (mesh, scale) = match kind {
-                Some(LiveObjectKind::Station) => (MeshKind::Box, 4.0),
-                Some(LiveObjectKind::ShipExtraLarge) => (MeshKind::Box, 2.5),
-                Some(LiveObjectKind::ShipLarge) => (MeshKind::Box, 1.5),
-                Some(LiveObjectKind::ShipMedium) => (MeshKind::Sphere, 1.0),
-                Some(LiveObjectKind::ShipSmall) => (MeshKind::Sphere, 0.5),
-                None => continue,
-            };
-            let fcolor = world
-                .factions
-                .get(&eid)
-                .copied()
-                .map(|fid| crate::colors::faction_color(universe, fid))
+            if world.parent_of(eid).is_some() { continue; }
+            let Some(&pos) = world.positions.get(&eid) else { continue };
+            let kind = match world.kinds.get(&eid) { Some(k) => k.clone(), None => continue };
+            let Some(screen) = project(pos) else { continue };
+            let macro_name = world.names.get(&eid).map(String::as_str).unwrap_or("");
+            let owner_str = world.factions.get(&eid).and_then(|f| fid_to_str.get(f).copied());
+            let icon = classify_live(kind, macro_name, owner_str);
+            let ring = world.factions.get(&eid).copied()
+                .map(|f| crate::colors::faction_color(universe, f))
                 .unwrap_or(crate::theme::TEXT_MUTED);
-            let base = [
-                fcolor.r() as f32 / 255.0,
-                fcolor.g() as f32 / 255.0,
-                fcolor.b() as f32 / 255.0,
-                1.0,
-            ];
-            let color = if selected_entity == Some(eid) {
-                [1.0, 0.8, 0.1, 1.0]
-            } else {
-                base
-            };
-            let model = Mat4::from_translation(pos) * Mat4::from_scale(Vec3::splat(scale));
-            calls.push(DrawCall {
-                kind: mesh,
-                mvp: model,
-                color,
-            });
+            emit(screen, icon, ring, selected_entity == Some(eid));
         }
     }
-    calls
 }
 
-fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
-    match kind {
-        StaticObjectKind::Station => [0.4, 0.6, 1.0, 1.0],
-        StaticObjectKind::Gate => [0.2, 0.9, 0.4, 1.0],
-        StaticObjectKind::ResourceZone => [0.5, 0.3, 0.9, 0.5],
-        StaticObjectKind::Anomaly => [1.0, 0.4, 0.2, 1.0],
-        StaticObjectKind::Highway => [0.3, 0.9, 0.5, 1.0],
-    }
-}
-
-/// Project each object and entity to screen space; return the target nearest to click (within 20px).
+/// Project each object and entity to screen space; return the target nearest to click (within 24px).
 fn pick_target(
     ptr: egui::Pos2,
     rect: egui::Rect,
@@ -288,7 +323,7 @@ fn pick_target(
 
     let consider = |sp: egui::Pos2, target: ClickedTarget, best: &mut Option<(f32, ClickedTarget)>| {
         let d = ((sp.x - ptr.x).powi(2) + (sp.y - ptr.y).powi(2)).sqrt();
-        if d < 20.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
+        if d < 24.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
             *best = Some((d, target));
         }
     };

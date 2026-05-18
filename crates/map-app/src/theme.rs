@@ -15,6 +15,24 @@ pub const SHIP_YELLOW: Color32 = Color32::from_rgb(244, 180, 74);
 pub const HOSTILE_RED: Color32 = Color32::from_rgb(239, 68, 68);
 
 pub fn apply(ctx: &egui::Context) {
+    // Install DejaVuSansMono as a fallback font so icon glyphs (⎈ ⚒ ⚔ ⚙ ⌂ ✦ ▦) render
+    // instead of tofu — egui's bundled fonts lack much of Misc Technical / Misc Symbols.
+    static FONT_BYTES: &[u8] = include_bytes!("../assets/font.ttf");
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "dejavu_mono_icons".into(),
+        std::sync::Arc::new(egui::FontData::from_static(FONT_BYTES)),
+    );
+    // Push as a fallback at the END of Proportional + Monospace families so egui's
+    // default font wins for normal text, and our font kicks in only for missing glyphs.
+    if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        prop.push("dejavu_mono_icons".into());
+    }
+    if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        mono.push("dejavu_mono_icons".into());
+    }
+    ctx.set_fonts(fonts);
+
     let mut style = Style::default();
     style.visuals = dark_visuals();
     ctx.set_global_style(style);
