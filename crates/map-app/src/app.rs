@@ -36,7 +36,7 @@ impl App {
         crate::theme::apply(&cc.egui_ctx);
 
         if let Some(rs) = &cc.wgpu_render_state {
-            let scene = crate::renderer::gpu::GpuScene::new(&rs.device, &rs.queue, rs.target_format);
+            let scene = crate::renderer::gpu::GpuScene::new(&rs.device, rs.target_format);
             rs.renderer.write().callback_resources.insert(scene);
         }
 

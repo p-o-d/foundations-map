@@ -44,16 +44,11 @@ pub struct GpuScene {
     pub bind_group: wgpu::BindGroup,
     pub uniform_buf: wgpu::Buffer,
     pub meshes: HashMap<MeshKind, GpuMesh>,
-    pub sprite: crate::renderer::sprite::SpritePipeline,
-    pub sprite_instances: Vec<crate::renderer::sprite::SpriteInstance>,
-    pub camera_view_proj: glam::Mat4,
-    pub camera_viewport: [f32; 2],
 }
 
 impl GpuScene {
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         target_format: wgpu::TextureFormat,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -149,40 +144,12 @@ impl GpuScene {
             meshes.insert(kind, upload_mesh(device, &mesh));
         }
 
-        // Build the icon atlas + sprite pipeline.
-        let (atlas_bytes, _missing) = crate::renderer::atlas::rasterise_glyphs(
-            include_bytes!("../../assets/font.ttf"),
-        );
-        let sprite = crate::renderer::sprite::SpritePipeline::new(
-            device,
-            queue,
-            target_format,
-            &atlas_bytes,
-            crate::renderer::atlas::ATLAS_W as u32,
-            crate::renderer::atlas::ATLAS_H as u32,
-        );
-
         Self {
             pipeline,
             bind_group,
             uniform_buf,
             meshes,
-            sprite,
-            sprite_instances: Vec::new(),
-            camera_view_proj: glam::Mat4::IDENTITY,
-            camera_viewport: [1.0, 1.0],
         }
-    }
-
-    pub fn set_sprite_instances(
-        &mut self,
-        view_proj: glam::Mat4,
-        viewport: [f32; 2],
-        instances: Vec<crate::renderer::sprite::SpriteInstance>,
-    ) {
-        self.camera_view_proj = view_proj;
-        self.camera_viewport = viewport;
-        self.sprite_instances = instances;
     }
 }
 
@@ -213,16 +180,13 @@ pub struct DrawCall {
 
 pub struct SceneCallback {
     pub draw_calls: Vec<DrawCall>,
-    pub view_proj: glam::Mat4,
-    pub viewport: [f32; 2],
-    pub sprite_instances: Vec<crate::renderer::sprite::SpriteInstance>,
 }
 
 // PaintCallbackInfo is in egui (re-exported from epaint), not egui_wgpu
 impl egui_wgpu::CallbackTrait for SceneCallback {
     fn prepare(
         &self,
-        device: &wgpu::Device,
+        _device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
@@ -251,14 +215,6 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             queue.write_buffer(&scene.uniform_buf, 0, &buf);
         }
 
-        // Push sprite data into scene + upload buffers.
-        scene.set_sprite_instances(self.view_proj, self.viewport, self.sprite_instances.clone());
-        scene
-            .sprite
-            .update_camera(queue, scene.camera_view_proj, scene.camera_viewport);
-        let instances = scene.sprite_instances.clone();
-        scene.sprite.upload_instances(device, queue, &instances);
-
         vec![]
     }
 
@@ -286,10 +242,5 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             render_pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
             draw_idx += 1;
         }
-
-        // Sprite draw on top, alpha-blended.
-        scene
-            .sprite
-            .draw(render_pass, scene.sprite_instances.len() as u32);
     }
 }

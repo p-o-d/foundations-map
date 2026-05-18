@@ -15,4 +15,3 @@ egui = "0.34.2"
 glam = "0.32.1"
 bytemuck = { version = "1", features = ["derive"] }
 dirs = "5"
-ab_glyph = "0.2"

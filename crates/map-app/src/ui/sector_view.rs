@@ -105,22 +105,11 @@ impl SectorView3D {
             })
             .collect();
 
-        // Build sprite instances (atlas lookup is cheap — small HashMap of 14 entries).
-        let atlas = crate::renderer::atlas::AtlasLookup::build();
-        let sprite_instances = sector
-            .map(|s| build_sprite_instances(s, world, universe, selected_obj, selected_entity, &atlas))
-            .unwrap_or_default();
-        let viewport = [view_rect.width(), view_rect.height()];
-
-        // Push wgpu paint callback for the 3D view rect
+        // Push wgpu paint callback for the 3D view rect (mesh pipeline only;
+        // sprite path retired in favour of painter-based icon rendering below).
         let cb = eframe::egui_wgpu::Callback::new_paint_callback(
             view_rect,
-            SceneCallback {
-                draw_calls,
-                view_proj: vp,
-                viewport,
-                sprite_instances,
-            },
+            SceneCallback { draw_calls },
         );
         ui.painter().add(cb);
 
@@ -131,6 +120,20 @@ impl SectorView3D {
 
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
         draw_axis_arrows(ui.painter(), view_rect, camera);
+
+        // Screen-space icon overlay (stations + live entities).
+        if let Some(sec) = sector {
+            draw_icons_2d(
+                ui.painter(),
+                view_rect,
+                camera,
+                sec,
+                world,
+                universe,
+                selected_obj,
+                selected_entity,
+            );
+        }
 
         // Click + hover detection — unified across static + live targets.
         let mut clicked: Option<ClickedTarget> = None;
@@ -177,62 +180,90 @@ fn build_draw_calls(
     Vec::new()
 }
 
-fn build_sprite_instances(
-    sector: &map_domain::universe::Sector,
+/// Project each entity (static objects + live ships/stations) to screen space
+/// and paint a ring + glyph at the result. Pure 2D-over-3D — guaranteed
+/// constant pixel size regardless of camera distance.
+fn draw_icons_2d(
+    painter: &egui::Painter,
+    view_rect: egui::Rect,
+    camera: &OrbitCamera,
+    sector: &Sector,
     world: Option<&map_domain::world::World>,
     universe: &map_domain::universe::Universe,
     selected_obj: Option<ObjectId>,
     selected_entity: Option<map_domain::world::EntityId>,
-    atlas: &crate::renderer::atlas::AtlasLookup,
-) -> Vec<crate::renderer::sprite::SpriteInstance> {
-    use crate::renderer::atlas::{classify_live, classify_static};
-    use crate::renderer::sprite::SpriteInstance;
+) {
+    use crate::renderer::atlas::{classify_live, classify_static, icon_char, IconId};
 
-    let mut out: Vec<SpriteInstance> = Vec::new();
+    let aspect = view_rect.width() / view_rect.height().max(1.0);
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
 
+    let project = |w_pos: Vec3| -> Option<Pos2> {
+        let clip = vp * w_pos.extend(1.0);
+        if clip.w <= 0.0 { return None; }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        Some(Pos2::new(
+            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
+        ))
+    };
+
+    const RADIUS_NORMAL_PX: f32 = 14.0;
+    const RADIUS_SELECTED_PX: f32 = 18.0;
+    const RING_THICKNESS_NORMAL: f32 = 2.0;
+    const RING_THICKNESS_SELECTED: f32 = 3.0;
+    const GLYPH_FONT_PX: f32 = 18.0;
+    const GLYPH_FONT_PX_SELECTED: f32 = 22.0;
+    let selection_color = egui::Color32::from_rgb(255, 217, 25);
+
+    let emit = |screen: Pos2, icon: IconId, ring: egui::Color32, selected: bool| {
+        let radius = if selected { RADIUS_SELECTED_PX } else { RADIUS_NORMAL_PX };
+        let thickness = if selected { RING_THICKNESS_SELECTED } else { RING_THICKNESS_NORMAL };
+        let ring_color = if selected { selection_color } else { ring };
+        let font_px = if selected { GLYPH_FONT_PX_SELECTED } else { GLYPH_FONT_PX };
+        painter.circle_stroke(screen, radius, egui::Stroke::new(thickness, ring_color));
+        let glyph: String = std::iter::once(icon_char(icon)).collect();
+        painter.text(
+            screen,
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            egui::FontId::proportional(font_px),
+            egui::Color32::WHITE,
+        );
+    };
+
+    // Static objects.
     for obj in &sector.static_objects {
         let Some(icon) = classify_static(&obj.kind) else { continue };
-        let ring_color = obj
-            .faction
+        let Some(screen) = project(obj.position) else { continue };
+        let ring = obj.faction
             .map(|f| crate::colors::faction_color(universe, f))
             .unwrap_or(crate::theme::TEXT_MUTED);
-        let ring_rgba = color_to_rgba(ring_color);
-        let selected = selected_obj == Some(obj.id);
-        out.push(SpriteInstance::from_target(obj.position, icon, ring_rgba, selected, atlas));
+        emit(screen, icon, ring, selected_obj == Some(obj.id));
     }
 
+    // Live entities (top-level only).
     if let Some(world) = world {
         let mut fid_to_str: std::collections::HashMap<map_domain::ids::FactionId, &str> =
             std::collections::HashMap::new();
         for (k, v) in &universe.faction_strings {
             fid_to_str.insert(*v, k.as_str());
         }
-
         for &eid in world.entities_in_sector(sector.id) {
             if world.parent_of(eid).is_some() { continue; }
             let Some(&pos) = world.positions.get(&eid) else { continue };
-            let Some(kind) = world.kinds.get(&eid).cloned() else { continue };
+            let kind = match world.kinds.get(&eid) { Some(k) => k.clone(), None => continue };
+            let Some(screen) = project(pos) else { continue };
             let macro_name = world.names.get(&eid).map(String::as_str).unwrap_or("");
             let owner_str = world.factions.get(&eid).and_then(|f| fid_to_str.get(f).copied());
             let icon = classify_live(kind, macro_name, owner_str);
-            let ring_color = world.factions.get(&eid).copied()
+            let ring = world.factions.get(&eid).copied()
                 .map(|f| crate::colors::faction_color(universe, f))
                 .unwrap_or(crate::theme::TEXT_MUTED);
-            let ring_rgba = color_to_rgba(ring_color);
-            let selected = selected_entity == Some(eid);
-            out.push(SpriteInstance::from_target(pos, icon, ring_rgba, selected, atlas));
+            emit(screen, icon, ring, selected_entity == Some(eid));
         }
     }
-    out
-}
-
-fn color_to_rgba(c: egui::Color32) -> [f32; 4] {
-    [
-        c.r() as f32 / 255.0,
-        c.g() as f32 / 255.0,
-        c.b() as f32 / 255.0,
-        c.a() as f32 / 255.0,
-    ]
 }
 
 /// Project each object and entity to screen space; return the target nearest to click (within 24px).
