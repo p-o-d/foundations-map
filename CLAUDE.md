@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repo.
 
 ## Project
 
-`foundations-map` — Interactive 2D universe map + 3D sector view for X4 Foundations (space sim). Rust workspace, edition 2024, cross-platform (Linux Wayland + Windows). 53 tests across 6 suites.
+`foundations-map` — Interactive 2D universe map + 3D sector view for X4 Foundations (space sim). Rust workspace, edition 2024, cross-platform (Linux Wayland + Windows). 75 tests across 6 suites.
 
 ## Commands
 
@@ -45,9 +45,10 @@ crates/
 Plus single-path reads (via `read_all_game_files` for DLC merge):
 - `libraries/mapdefaults.xml` — `(macro → (pageId, textId))` for sector + cluster names
 - `t/0001-l044.xml` — translation table; pages **20003** (cluster names) and **20004** (sector names)
-- `libraries/god.xml` — fixed `<object>` placements (wormholes, landmarks, debris) + 538 `<station>` entries (130 have fixed `<position>`; rest are procedural)
+- `libraries/god.xml` — fixed `<object>` placements (wormholes, landmarks, debris); `<station>` entries skipped (live stations come from save snapshot instead)
+- `libraries/factions.xml` + `libraries/colors.xml` parsed to populate `Universe.faction_table: HashMap<FactionId, FactionMeta { display_name, color: [u8;4] }>` — drives panel labels + GPU tints
 
-**Final loaded:** 144 sectors, 119 clusters, ~448 gates, ~221 stations, ~67 god objects, ~103 superhighway endpoints, ~28 inter-sector superhighway pairs. Single-sector clusters still listed in `Universe.clusters` for sector-membership lookup; rendered cluster hex skipped.
+**Final loaded:** 144 sectors, 119 clusters, ~448 gates, ~67 god objects, ~103 superhighway endpoints, ~28 inter-sector superhighway pairs. Live ships + stations (~13k) loaded from save snapshot. Single-sector clusters still listed in `Universe.clusters` for sector-membership lookup; rendered cluster hex skipped.
 
 ### cat/dat archive format
 
@@ -79,7 +80,7 @@ We do the same:
 ```rust
 pub struct StaticObject {
     pub id: ObjectId,             // unique; ranges 10k=gates, 20k=non-gate zone objs,
-                                  // 30k=god objects, 40k=superhighway endpoints, 50k=stations
+                                  // 30k=god objects, 40k=superhighway endpoints
     pub kind: StaticObjectKind,   // Station | Gate | ResourceZone | Anomaly | Highway
     pub position: Vec3,           // km (metres ÷ 1000)
     pub faction: Option<FactionId>,
@@ -137,6 +138,8 @@ pub struct StaticObject {
 | 2 — 3D Sector View | ✅ done + bonus | Gates as 2D overlays, stations from god.xml, full property panel |
 | 3 — Live Data | ✅ done | Save-game XML snapshot parsed in background; auto-reload via notify watcher; live ships in 3D + per-sector counts on 2D |
 | 4 — Search + Polish | ⏸ later | Search index over 144 sectors + 743 static objects |
+
+2026-05-18: Phase 3 polish — live ships + stations rendered via GPU pipeline, hierarchical side panel with parent/child nav, in-game faction colours + names, dropped redundant god.xml stations, captured nested entities. See `docs/superpowers/specs/2026-05-18-station-fixes-design.md`.
 
 ## Conventions
 
