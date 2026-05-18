@@ -52,6 +52,162 @@ pub fn draw_static_frame(painter: &Painter, center: Pos2, half: f32, dot_r: f32)
     }
 }
 
+/// Paint the inner glyph for the given IconId at `center`. `half` is the icon
+/// half-size in screen pixels (HALF_NORMAL or HALF_SELECTED). `frame_color` is
+/// passed through to a couple of glyphs that need it (HQ command dot, Transport
+/// dividers).
+pub fn draw_glyph(
+    painter: &Painter,
+    icon: IconId,
+    center: Pos2,
+    half: f32,
+    frame_color: Color32,
+) {
+    let s = half / 8.0;
+    let white = Color32::WHITE;
+
+    match icon {
+        // -- stations --
+        IconId::Factory        => glyph_factory(painter, center, s, white),
+        IconId::WharfShipyard  => glyph_wharf_shipyard(painter, center, s, white),
+        IconId::Defense        => glyph_defense(painter, center, s, white),
+        IconId::Trading        => glyph_trading(painter, center, s, white),
+        IconId::EquipDock      => glyph_equip_dock(painter, center, s, white),
+        IconId::HQ             => glyph_hq(painter, center, s, white, frame_color),
+        IconId::PlayerStation  => glyph_player_station(painter, center, s, white),
+        IconId::GenericStation => glyph_generic_station(painter, center, s, white),
+
+        // -- ships --
+        IconId::Capital   => glyph_capital(painter, center, s, white),
+        IconId::Medium    => glyph_medium(painter, center, s, white),
+        IconId::Small     => glyph_small(painter, center, s, white),
+        IconId::Transport => glyph_transport(painter, center, s, white, frame_color),
+
+        // -- static --
+        IconId::Anomaly      => glyph_anomaly(painter, center, s, white),
+        IconId::ResourceZone => glyph_resource_zone(painter, center, s, white),
+    }
+}
+
+// -------------------------------------------------------------------------
+// Station glyphs
+// -------------------------------------------------------------------------
+
+fn glyph_factory(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // stepped refinery silhouette
+    let pts = [
+        (-3.0, 3.0),
+        (-3.0, 0.0),
+        (0.0, 2.0),
+        (0.0, -2.0),
+        (3.0, 0.0),
+        (3.0, -3.0),
+        (4.0, -3.0),
+        (4.0, 3.0),
+    ]
+    .into_iter()
+    .map(|(x, y)| Pos2::new(c.x + x * s, c.y + y * s))
+    .collect::<Vec<_>>();
+    p.add(egui::Shape::Path(egui::epaint::PathShape {
+        points: pts,
+        closed: true,
+        fill: col,
+        stroke: egui::epaint::PathStroke::NONE,
+    }));
+}
+
+fn glyph_wharf_shipyard(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // L-shaped crane jib + load box
+    let stroke = Stroke::new(1.6 * s, col);
+    let post_top = Pos2::new(c.x - 3.0 * s, c.y - 3.0 * s);
+    let post_bot = Pos2::new(c.x - 3.0 * s, c.y + 3.0 * s);
+    let arm_end  = Pos2::new(c.x + 3.0 * s, c.y - 3.0 * s);
+    p.line_segment([post_top, post_bot], stroke);
+    p.line_segment([post_top, arm_end], stroke);
+    let load = Rect::from_min_size(
+        Pos2::new(c.x + 1.0 * s, c.y - 1.0 * s),
+        Vec2::new(3.0 * s, 3.0 * s),
+    );
+    p.rect_filled(load, 0.0, col);
+}
+
+fn glyph_defense(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // heraldic shield
+    let pts = [
+        (0.0, -4.0),
+        (4.0, -3.0),
+        (3.0, 2.0),
+        (0.0, 4.0),
+        (-3.0, 2.0),
+        (-4.0, -3.0),
+    ]
+    .into_iter()
+    .map(|(x, y)| Pos2::new(c.x + x * s, c.y + y * s))
+    .collect::<Vec<_>>();
+    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+}
+
+fn glyph_trading(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // 3-coin stack — wide ellipses approximated as 24-segment polygons
+    for dy in [-3.5_f32, 0.0, 3.5] {
+        ellipse_filled(p, Pos2::new(c.x, c.y + dy * s), 5.0 * s, 1.2 * s, col);
+    }
+}
+
+fn glyph_equip_dock(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // thick repair plus
+    let v = Rect::from_center_size(c, Vec2::new(2.0 * s, 12.0 * s));
+    let h = Rect::from_center_size(c, Vec2::new(12.0 * s, 2.0 * s));
+    p.rect_filled(v, 0.0, col);
+    p.rect_filled(h, 0.0, col);
+}
+
+fn glyph_hq(p: &Painter, c: Pos2, s: f32, col: Color32, dot_color: Color32) {
+    // pyramid + command dot (dot uses frame colour, so player-owned HQ shows white dot)
+    let pts = vec![
+        Pos2::new(c.x + 0.0 * s, c.y - 3.5 * s),
+        Pos2::new(c.x + 5.0 * s, c.y + 4.0 * s),
+        Pos2::new(c.x - 5.0 * s, c.y + 4.0 * s),
+    ];
+    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+    p.circle_filled(Pos2::new(c.x, c.y + 1.5 * s), 1.4 * s, dot_color);
+}
+
+fn glyph_player_station(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // inner diamond (frame is drawn separately with white stroke by caller)
+    let pts = vec![
+        Pos2::new(c.x + 0.0 * s, c.y - 5.0 * s),
+        Pos2::new(c.x + 5.0 * s, c.y + 0.0 * s),
+        Pos2::new(c.x + 0.0 * s, c.y + 5.0 * s),
+        Pos2::new(c.x - 5.0 * s, c.y + 0.0 * s),
+    ];
+    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+}
+
+fn glyph_generic_station(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    p.circle_stroke(c, 3.5 * s, Stroke::new(1.6 * s, col));
+}
+
+/// 24-segment polygon ellipse — egui doesn't have a built-in filled ellipse.
+fn ellipse_filled(p: &Painter, center: Pos2, rx: f32, ry: f32, col: Color32) {
+    const N: usize = 24;
+    let pts: Vec<Pos2> = (0..N)
+        .map(|i| {
+            let t = (i as f32) * std::f32::consts::TAU / (N as f32);
+            Pos2::new(center.x + rx * t.cos(), center.y + ry * t.sin())
+        })
+        .collect();
+    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+}
+
+// stubs — filled in by Task 5 + Task 6
+fn glyph_capital(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
+fn glyph_medium(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
+fn glyph_small(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
+fn glyph_transport(_p: &Painter, _c: Pos2, _s: f32, _col: Color32, _div: Color32) {}
+fn glyph_anomaly(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
+fn glyph_resource_zone(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
