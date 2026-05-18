@@ -235,17 +235,7 @@ fn color_to_rgba(c: egui::Color32) -> [f32; 4] {
     ]
 }
 
-fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
-    match kind {
-        StaticObjectKind::Station => [0.4, 0.6, 1.0, 1.0],
-        StaticObjectKind::Gate => [0.2, 0.9, 0.4, 1.0],
-        StaticObjectKind::ResourceZone => [0.5, 0.3, 0.9, 0.5],
-        StaticObjectKind::Anomaly => [1.0, 0.4, 0.2, 1.0],
-        StaticObjectKind::Highway => [0.3, 0.9, 0.5, 1.0],
-    }
-}
-
-/// Project each object and entity to screen space; return the target nearest to click (within 20px).
+/// Project each object and entity to screen space; return the target nearest to click (within 24px).
 fn pick_target(
     ptr: egui::Pos2,
     rect: egui::Rect,
