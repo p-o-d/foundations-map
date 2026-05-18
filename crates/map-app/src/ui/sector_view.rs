@@ -132,6 +132,11 @@ impl SectorView3D {
             sector.and_then(|sec| pick_target(pos, view_rect, camera, sec, world))
         });
 
+        // Hover label: tooltip-style box over the hovered target
+        if let (Some(target), Some(sec)) = (hovered, sector) {
+            draw_hover_label(ui.painter(), view_rect, camera, sec, world, universe, target);
+        }
+
         // Border around canvas
         ui.painter().rect_stroke(
             canvas_rect,
@@ -398,6 +403,107 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
             egui::FontId::monospace(10.0),
             *color,
         );
+    }
+}
+
+/// Draw a tooltip-style label box anchored to a hovered 3D target.
+/// Shows code / name / faction for entities, name / type for static objects.
+fn draw_hover_label(
+    painter: &egui::Painter,
+    view_rect: Rect,
+    camera: &OrbitCamera,
+    sector: &Sector,
+    world: Option<&map_domain::world::World>,
+    universe: &map_domain::universe::Universe,
+    target: ClickedTarget,
+) {
+    let aspect = view_rect.width() / view_rect.height().max(1.0);
+    let vp = camera.proj_matrix(aspect) * camera.view_matrix();
+
+    let project = |w_pos: Vec3| -> Option<Pos2> {
+        let clip = vp * w_pos.extend(1.0);
+        if clip.w <= 0.0 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        Some(Pos2::new(
+            (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
+            (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
+        ))
+    };
+
+    // Lines to draw: (text, color)
+    let mut lines: Vec<(String, egui::Color32)> = Vec::new();
+    let anchor_pos: Option<Pos2> = match target {
+        ClickedTarget::Static(obj_id) => {
+            if let Some(obj) = sector.static_objects.iter().find(|o| o.id == obj_id) {
+                lines.push((obj.name.clone(), crate::theme::TEXT_PRIMARY));
+                lines.push((format!("Type: {:?}", obj.kind), crate::theme::TEXT_MUTED));
+                project(obj.position)
+            } else {
+                None
+            }
+        }
+        ClickedTarget::Entity(eid) => {
+            if let Some(world) = world {
+                let code = world.codes.get(&eid).cloned();
+                let macro_name = world.names.get(&eid).cloned();
+                let human = macro_name.as_deref().map(|m| {
+                    let s = m.to_lowercase();
+                    let s = s.strip_suffix("_macro").unwrap_or(&s).to_owned();
+                    s.replace('_', " ")
+                });
+                if let Some(c) = &code {
+                    lines.push((c.clone(), crate::theme::ACCENT));
+                }
+                if let Some(h) = &human {
+                    if !h.is_empty() && Some(h) != code.as_ref() {
+                        lines.push((h.clone(), crate::theme::TEXT_PRIMARY));
+                    }
+                }
+                if let Some(&fid) = world.factions.get(&eid) {
+                    let f_name = crate::colors::faction_name(universe, fid);
+                    let f_color = crate::colors::faction_color(universe, fid);
+                    lines.push((f_name.to_string(), f_color));
+                }
+                world.positions.get(&eid).copied().and_then(project)
+            } else {
+                None
+            }
+        }
+    };
+    let Some(anchor) = anchor_pos else {
+        return;
+    };
+    if lines.is_empty() {
+        return;
+    }
+
+    let font = egui::FontId::proportional(11.0);
+    let pad = 4.0;
+    let line_h = 14.0;
+    let max_w = lines
+        .iter()
+        .map(|(t, _)| {
+            painter
+                .layout_no_wrap(t.clone(), font.clone(), egui::Color32::WHITE)
+                .rect
+                .width()
+        })
+        .fold(0.0_f32, f32::max);
+    let h = pad * 2.0 + line_h * lines.len() as f32;
+    let label_rect = egui::Rect::from_min_size(
+        anchor + egui::Vec2::new(10.0, -h - 4.0),
+        egui::Vec2::new(max_w + pad * 2.0, h),
+    );
+    painter.rect_filled(
+        label_rect,
+        3.0,
+        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 200),
+    );
+    for (i, (text, color)) in lines.iter().enumerate() {
+        let p = label_rect.min + egui::Vec2::new(pad, pad + i as f32 * line_h);
+        painter.text(p, egui::Align2::LEFT_TOP, text, font.clone(), *color);
     }
 }
 
