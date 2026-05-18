@@ -271,7 +271,7 @@ fn pick_target(
 
     let consider = |sp: egui::Pos2, target: ClickedTarget, best: &mut Option<(f32, ClickedTarget)>| {
         let d = ((sp.x - ptr.x).powi(2) + (sp.y - ptr.y).powi(2)).sqrt();
-        if d < 20.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
+        if d < 24.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
             *best = Some((d, target));
         }
     };
