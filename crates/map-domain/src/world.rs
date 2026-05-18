@@ -30,6 +30,9 @@ pub struct World {
     pub sectors: HashMap<EntityId, SectorId>,
     /// Denormalised: all entities currently in a sector. Kept in sync by update_positions.
     pub sector_idx: HashMap<SectorId, Vec<EntityId>>,
+    pub parents: HashMap<EntityId, EntityId>,
+    pub children: HashMap<EntityId, Vec<EntityId>>,
+    pub codes: HashMap<EntityId, String>,
 }
 
 impl World {
@@ -45,6 +48,8 @@ impl World {
         faction: Option<FactionId>,
         position: Vec3,
         sector: SectorId,
+        parent: Option<EntityId>,
+        code: Option<String>,
     ) {
         self.names.insert(id, name);
         self.kinds.insert(id, kind);
@@ -54,6 +59,21 @@ impl World {
         self.positions.insert(id, position);
         self.sectors.insert(id, sector);
         self.sector_idx.entry(sector).or_default().push(id);
+        if let Some(p) = parent {
+            self.parents.insert(id, p);
+            self.children.entry(p).or_default().push(id);
+        }
+        if let Some(c) = code {
+            self.codes.insert(id, c);
+        }
+    }
+
+    pub fn parent_of(&self, id: EntityId) -> Option<EntityId> {
+        self.parents.get(&id).copied()
+    }
+
+    pub fn children_of(&self, id: EntityId) -> &[EntityId] {
+        self.children.get(&id).map(Vec::as_slice).unwrap_or(&[])
     }
 
     pub fn entities_in_sector(&self, sector: SectorId) -> &[EntityId] {
@@ -104,6 +124,8 @@ mod tests {
             Some(FactionId(1)),
             Vec3::new(100.0, 0.0, 200.0),
             sector_a(),
+            None,
+            None,
         );
         w.insert_entity(
             2,
@@ -112,6 +134,8 @@ mod tests {
             Some(FactionId(1)),
             Vec3::new(-500.0, 100.0, 0.0),
             sector_a(),
+            None,
+            None,
         );
         w.insert_entity(
             3,
@@ -120,6 +144,8 @@ mod tests {
             None,
             Vec3::new(0.0, 0.0, 0.0),
             sector_b(),
+            None,
+            None,
         );
         w
     }
@@ -167,6 +193,23 @@ mod tests {
         }]);
         assert_eq!(w.positions[&1], Vec3::new(999.0, 0.0, 0.0));
         assert_eq!(w.entities_in_sector(sector_a()).len(), 2);
+    }
+
+    #[test]
+    fn parent_child_links_track_correctly() {
+        let mut w = World::new();
+        w.insert_entity(
+            1, "station".into(), LiveObjectKind::Station,
+            None, Vec3::ZERO, sector_a(), None, Some("YIB-1".into()),
+        );
+        w.insert_entity(
+            2, "drone".into(), LiveObjectKind::ShipSmall,
+            None, Vec3::ZERO, sector_a(), Some(1), None,
+        );
+        assert_eq!(w.parent_of(2), Some(1));
+        assert_eq!(w.children_of(1), &[2]);
+        assert_eq!(w.parent_of(1), None);
+        assert_eq!(w.codes.get(&1).map(String::as_str), Some("YIB-1"));
     }
 }
 

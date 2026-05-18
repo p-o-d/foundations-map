@@ -99,6 +99,36 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     let translations = parse_translations_xml(&translations_str)?;
 
+    // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
+    let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
+        std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/factions.xml") {
+        let text = String::from_utf8_lossy(&data);
+        for (k, v) in crate::faction_parser::parse_factions_xml(&text) {
+            faction_defs.entry(k).or_insert(v); // first occurrence wins (main loads first)
+        }
+    }
+    let mut colors_map: std::collections::HashMap<String, [u8; 4]> =
+        std::collections::HashMap::new();
+    let mut mappings_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/colors.xml") {
+        let text = String::from_utf8_lossy(&data);
+        let (c, m) = crate::faction_parser::parse_colors_xml(&text);
+        for (k, v) in c {
+            colors_map.entry(k).or_insert(v);
+        }
+        for (k, v) in m {
+            mappings_map.entry(k).or_insert(v);
+        }
+    }
+    eprintln!(
+        "[map] Faction defs: {}, colors: {}, mappings: {}",
+        faction_defs.len(),
+        colors_map.len(),
+        mappings_map.len()
+    );
+
     // Group sectors by cluster
     let mut cluster_to_sectors: HashMap<String, Vec<String>> = HashMap::new();
     for (sector_macro, (cluster_macro, _, _)) in &sector_placements {
@@ -329,29 +359,6 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     eprintln!("[map] God objects loaded: {}", god_counter);
 
-    // Parse god.xml stations (main + all DLC extensions).
-    let mut station_counter = 0u32;
-    for god_data in crate::cat_reader::read_all_game_files(game_dir, "libraries/god.xml") {
-        let god_str = String::from_utf8_lossy(&god_data);
-        for (sec_lower, pos, rot, name, details) in parse_god_stations_xml(&god_str) {
-            if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
-                if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
-                    station_counter += 1;
-                    sector.static_objects.push(StaticObject {
-                        id: ObjectId(50_000 + station_counter),
-                        kind: StaticObjectKind::Station,
-                        position: pos,
-                        faction: None,
-                        name,
-                        rotation: rot,
-                        details,
-                    });
-                }
-            }
-        }
-    }
-    eprintln!("[map] God stations loaded: {}", station_counter);
-
     // Parse superhighway connections from clusters.xml (entry → exit, one-way).
     let mut sechighways: Vec<(String, String, String, String)> = Vec::new();
     for cs in &all_clusters_strs {
@@ -442,12 +449,46 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
-    Ok(Universe {
+    let mut universe = Universe {
         sectors,
         clusters,
         connections,
         sector_macros,
-    })
+        faction_strings: HashMap::new(),
+        faction_table: HashMap::new(),
+    };
+
+    // Assign sequential FactionIds and populate the faction table.
+    let mut next_id: u32 = 1;
+    let mut sorted_keys: Vec<&String> = faction_defs.keys().collect();
+    sorted_keys.sort(); // deterministic id assignment across runs
+    for faction_id_str in sorted_keys {
+        let def = &faction_defs[faction_id_str];
+        let fid = map_domain::ids::FactionId(next_id);
+        next_id += 1;
+        let display_name = translations
+            .get(&def.name_textref)
+            .cloned()
+            .unwrap_or_else(|| faction_id_str.clone());
+        let color = crate::faction_parser::resolve_faction_color(
+            &def.color_mapping,
+            &colors_map,
+            &mappings_map,
+        )
+        .unwrap_or([192, 192, 192, 255]);
+        universe
+            .faction_strings
+            .insert(faction_id_str.clone(), fid);
+        universe
+            .faction_table
+            .insert(fid, map_domain::universe::FactionMeta { display_name, color });
+    }
+    eprintln!(
+        "[map] Built faction table: {} factions",
+        universe.faction_table.len()
+    );
+
+    Ok(universe)
 }
 
 /// galaxy.xml: cluster_macro_name → absolute (x, z) position in metres.
@@ -1226,283 +1267,7 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
     result
 }
 
-/// god.xml: fixed station placements.
-///
-/// Walks outer `<station>` elements (with `id` attribute). Extracts:
-/// - attrs: `id`, `race`, `owner`, `type`, `encyclopedia`
-/// - `<location class="..." macro="..."/>`: sector via direct lookup or
-///   `zone_macro_to_sector_lower` for zones
-/// - `<position x y z yaw pitch roll />`: position metres → km, optional rotation
-/// - `<quotas><quota gamestart="..." faction="..." /></quotas>`: optional metadata
-///
-/// Only emits stations with a `<position>` (skips procedural stations).
-fn parse_god_stations_xml(
-    xml: &str,
-) -> Vec<(
-    String,
-    Vec3,
-    Option<(f32, f32, f32)>,
-    String,
-    Vec<(String, String)>,
-)> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
-    let mut result = Vec::new();
-    // depth counter: 0 = not inside any <station>, 1 = inside outer station, >1 = nested
-    let mut station_depth: u32 = 0;
-    // Attrs/state captured for the current outer <station>.
-    let mut id_attr: String = String::new();
-    let mut race_attr: String = String::new();
-    let mut owner_attr: String = String::new();
-    let mut type_attr: String = String::new();
-    let mut enc_attr: String = String::new();
-    let mut loc_sec: Option<String> = None;
-    let mut pos: Option<(f32, f32, f32)> = None;
-    let mut rot: Option<(f32, f32, f32)> = None;
-    let mut in_quotas = false;
-    let mut gamestart_attr: String = String::new();
-    let mut quota_faction: String = String::new();
-    let mut buf = Vec::new();
-
-    let reset = |id_attr: &mut String,
-                 race_attr: &mut String,
-                 owner_attr: &mut String,
-                 type_attr: &mut String,
-                 enc_attr: &mut String,
-                 loc_sec: &mut Option<String>,
-                 pos: &mut Option<(f32, f32, f32)>,
-                 rot: &mut Option<(f32, f32, f32)>,
-                 gamestart_attr: &mut String,
-                 quota_faction: &mut String| {
-        id_attr.clear();
-        race_attr.clear();
-        owner_attr.clear();
-        type_attr.clear();
-        enc_attr.clear();
-        *loc_sec = None;
-        *pos = None;
-        *rot = None;
-        gamestart_attr.clear();
-        quota_faction.clear();
-    };
-
-    // Closure helper to read location attrs.
-    let read_location = |e: &quick_xml::events::BytesStart| -> Option<String> {
-        let cls = attr_value(e, b"class").unwrap_or_default();
-        let mac = attr_value(e, b"macro").unwrap_or_default();
-        if mac.is_empty() {
-            return None;
-        }
-        if cls == "sector" {
-            Some(mac.to_lowercase())
-        } else {
-            // zone, cluster, etc. — try zone-based resolution
-            zone_macro_to_sector_lower(&mac)
-        }
-    };
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Eof) => break,
-
-            Ok(Event::Start(ref e)) => {
-                match e.name().as_ref() {
-                    b"station" => {
-                        station_depth += 1;
-                        if station_depth == 1 {
-                            // outer station opening
-                            reset(
-                                &mut id_attr,
-                                &mut race_attr,
-                                &mut owner_attr,
-                                &mut type_attr,
-                                &mut enc_attr,
-                                &mut loc_sec,
-                                &mut pos,
-                                &mut rot,
-                                &mut gamestart_attr,
-                                &mut quota_faction,
-                            );
-                            id_attr = attr_value(e, b"id").unwrap_or_default();
-                            race_attr = attr_value(e, b"race").unwrap_or_default();
-                            owner_attr = attr_value(e, b"owner").unwrap_or_default();
-                            type_attr = attr_value(e, b"type").unwrap_or_default();
-                            enc_attr = attr_value(e, b"encyclopedia").unwrap_or_default();
-                            in_quotas = false;
-                        }
-                    }
-                    b"location" if station_depth == 1 => {
-                        // Some location elements may be Start (with children); capture attrs here too.
-                        if loc_sec.is_none() {
-                            loc_sec = read_location(e);
-                        }
-                    }
-                    b"position" if station_depth == 1 => {
-                        let x: f32 = attr_value(e, b"x")
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(0.0);
-                        let y: f32 = attr_value(e, b"y")
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(0.0);
-                        let z: f32 = attr_value(e, b"z")
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(0.0);
-                        let yaw: Option<f32> = attr_value(e, b"yaw").and_then(|s| s.parse().ok());
-                        let pitch: Option<f32> =
-                            attr_value(e, b"pitch").and_then(|s| s.parse().ok());
-                        let roll: Option<f32> = attr_value(e, b"roll").and_then(|s| s.parse().ok());
-                        pos = Some((x / 1000.0, y / 1000.0, z / 1000.0));
-                        let yy = yaw.unwrap_or(0.0);
-                        let pp = pitch.unwrap_or(0.0);
-                        let rr = roll.unwrap_or(0.0);
-                        if yaw.is_some() || pitch.is_some() || roll.is_some() {
-                            if yy != 0.0 || pp != 0.0 || rr != 0.0 {
-                                rot = Some((pp, yy, rr));
-                            }
-                        }
-                    }
-                    b"quotas" if station_depth == 1 => {
-                        in_quotas = true;
-                    }
-                    b"quota" if station_depth == 1 && in_quotas => {
-                        let gs = attr_value(e, b"gamestart").unwrap_or_default();
-                        let fc = attr_value(e, b"faction").unwrap_or_default();
-                        if gamestart_attr.is_empty() && !gs.is_empty() {
-                            gamestart_attr = gs;
-                        }
-                        if quota_faction.is_empty() && !fc.is_empty() {
-                            quota_faction = fc;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            Ok(Event::Empty(ref e)) => match e.name().as_ref() {
-                b"location" if station_depth == 1 => {
-                    if loc_sec.is_none() {
-                        loc_sec = read_location(e);
-                    }
-                }
-                b"position" if station_depth == 1 => {
-                    let x: f32 = attr_value(e, b"x")
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0);
-                    let y: f32 = attr_value(e, b"y")
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0);
-                    let z: f32 = attr_value(e, b"z")
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0);
-                    let yaw: Option<f32> = attr_value(e, b"yaw").and_then(|s| s.parse().ok());
-                    let pitch: Option<f32> = attr_value(e, b"pitch").and_then(|s| s.parse().ok());
-                    let roll: Option<f32> = attr_value(e, b"roll").and_then(|s| s.parse().ok());
-                    pos = Some((x / 1000.0, y / 1000.0, z / 1000.0));
-                    let yy = yaw.unwrap_or(0.0);
-                    let pp = pitch.unwrap_or(0.0);
-                    let rr = roll.unwrap_or(0.0);
-                    if yaw.is_some() || pitch.is_some() || roll.is_some() {
-                        if yy != 0.0 || pp != 0.0 || rr != 0.0 {
-                            rot = Some((pp, yy, rr));
-                        }
-                    }
-                }
-                b"quota" if station_depth == 1 && in_quotas => {
-                    let gs = attr_value(e, b"gamestart").unwrap_or_default();
-                    let fc = attr_value(e, b"faction").unwrap_or_default();
-                    if gamestart_attr.is_empty() && !gs.is_empty() {
-                        gamestart_attr = gs;
-                    }
-                    if quota_faction.is_empty() && !fc.is_empty() {
-                        quota_faction = fc;
-                    }
-                }
-                _ => {}
-            },
-
-            Ok(Event::End(ref e)) => match e.name().as_ref() {
-                b"station" => {
-                    if station_depth == 1 {
-                        // Emit if we have both a sector and a position.
-                        if let (Some(sec), Some((x, y, z))) = (loc_sec.clone(), pos) {
-                            // Build display name.
-                            let name = if !type_attr.is_empty() {
-                                let t = titlecase_simple(&type_attr);
-                                if !race_attr.is_empty() {
-                                    format!("{} ({})", t, titlecase_simple(&race_attr))
-                                } else {
-                                    t
-                                }
-                            } else if !id_attr.is_empty() {
-                                id_attr.clone()
-                            } else {
-                                "Station".to_string()
-                            };
-
-                            let mut details: Vec<(String, String)> = Vec::new();
-                            if !id_attr.is_empty() {
-                                details.push(("ID".to_string(), id_attr.clone()));
-                            }
-                            if !race_attr.is_empty() {
-                                details.push(("Race".to_string(), race_attr.clone()));
-                            }
-                            if !owner_attr.is_empty() {
-                                details.push(("Owner".to_string(), owner_attr.clone()));
-                            }
-                            if !type_attr.is_empty() {
-                                details.push(("Type".to_string(), type_attr.clone()));
-                            }
-                            if !enc_attr.is_empty() {
-                                details.push(("Encyclopedia".to_string(), enc_attr.clone()));
-                            }
-                            if !gamestart_attr.is_empty() {
-                                details.push(("Gamestart".to_string(), gamestart_attr.clone()));
-                            }
-                            if !quota_faction.is_empty()
-                                && quota_faction != race_attr
-                                && quota_faction != owner_attr
-                            {
-                                details.push(("Quota faction".to_string(), quota_faction.clone()));
-                            }
-
-                            result.push((sec, Vec3::new(x, y, z), rot, name, details));
-                        }
-                    }
-                    if station_depth > 0 {
-                        station_depth -= 1;
-                    }
-                }
-                b"quotas" if station_depth == 1 => {
-                    in_quotas = false;
-                }
-                _ => {}
-            },
-
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    result
-}
-
-/// Naive titlecase: split on `_` and capitalise each segment.
-fn titlecase_simple(s: &str) -> String {
-    s.split('_')
-        .filter(|seg| !seg.is_empty())
-        .map(|seg| {
-            let mut chars = seg.chars();
-            match chars.next() {
-                Some(c) => {
-                    c.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase()
-                }
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 /// Classify a static object by its macro reference name.
 fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
@@ -1853,6 +1618,8 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         clusters: vec![],
         connections: vec![],
         sector_macros: HashMap::new(),
+        faction_strings: HashMap::new(),
+        faction_table: HashMap::new(),
     })
 }
 

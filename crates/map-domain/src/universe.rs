@@ -2,6 +2,12 @@ use crate::ids::{ClusterId, FactionId, SectorId};
 use crate::objects::StaticObject;
 use glam::Vec2;
 
+#[derive(Debug, Clone)]
+pub struct FactionMeta {
+    pub display_name: String,
+    pub color: [u8; 4],
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GateType {
     Standard,
@@ -47,6 +53,10 @@ pub struct Universe {
     pub connections: Vec<Connection>,
     /// Lowercase sector macro → SectorId, for resolving save-file references.
     pub sector_macros: std::collections::HashMap<String, SectorId>,
+    /// Lowercase X4 faction id (e.g. "argon") → FactionId. Built at static load.
+    pub faction_strings: std::collections::HashMap<String, FactionId>,
+    /// FactionId → resolved display name + game palette colour.
+    pub faction_table: std::collections::HashMap<FactionId, FactionMeta>,
 }
 
 impl Universe {
@@ -79,6 +89,8 @@ mod tests {
         let b = SectorId(2);
         Universe {
             sector_macros: HashMap::new(),
+            faction_strings: HashMap::new(),
+            faction_table: HashMap::new(),
             sectors: vec![
                 Sector {
                     id: a,
@@ -130,5 +142,17 @@ mod tests {
         let u = make_universe();
         assert_eq!(u.neighbour_ids(SectorId(1)), vec![SectorId(2)]);
         assert_eq!(u.neighbour_ids(SectorId(2)), vec![SectorId(1)]);
+    }
+
+    #[test]
+    fn faction_table_holds_meta() {
+        let mut u = Universe::default();
+        u.faction_strings.insert("argon".into(), FactionId(1));
+        u.faction_table.insert(
+            FactionId(1),
+            FactionMeta { display_name: "Argon Federation".into(), color: [50, 120, 255, 255] },
+        );
+        assert_eq!(u.faction_strings.get("argon"), Some(&FactionId(1)));
+        assert_eq!(u.faction_table.get(&FactionId(1)).unwrap().display_name, "Argon Federation");
     }
 }

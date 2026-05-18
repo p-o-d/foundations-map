@@ -20,7 +20,9 @@ pub struct SectorChunk {
 #[derive(Debug, Clone)]
 pub struct EntityRecord {
     pub id: u32, // parsed from "[0xHEX]"
-    pub name: String,
+    pub parent_id: Option<u32>,
+    pub macro_name: String,
+    pub code: Option<String>,
     pub kind: LiveObjectKind,
     pub owner: Option<String>,
     pub position: glam::Vec3, // already km (metres / 1000)
@@ -46,13 +48,17 @@ mod tests {
     fn entity_record_constructs() {
         let e = EntityRecord {
             id: 0x100,
-            name: "station_arg_factory_01".into(),
+            parent_id: None,
+            macro_name: "station_arg_factory_01".into(),
+            code: Some("YIB-942".into()),
             kind: LiveObjectKind::Station,
             owner: Some("argon".into()),
             position: glam::Vec3::new(0.0, 0.0, 0.0),
             sector_macro: "cluster_01_sector001_macro".into(),
         };
         assert_eq!(e.id, 0x100);
+        assert_eq!(e.parent_id, None);
+        assert_eq!(e.code.as_deref(), Some("YIB-942"));
         assert_eq!(e.owner.as_deref(), Some("argon"));
     }
 }

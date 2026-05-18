@@ -9,18 +9,18 @@ use super::types::EntityRecord;
 
 /// Combine all per-worker entity lists into a single `World`. Resolves each
 /// record's `sector_macro` via `sector_macros` (drops records whose sector
-/// isn't known). Assigns a fresh `FactionId` to each first-seen owner string.
+/// isn't known). For new owner strings not already present in `faction_strings`,
+/// allocates the next FactionId from `next_faction_id` and inserts the mapping.
 pub fn merge(
     batches: Vec<Vec<EntityRecord>>,
     sector_macros: Option<&HashMap<String, SectorId>>,
+    faction_strings: &mut HashMap<String, FactionId>,
+    next_faction_id: &mut u32,
 ) -> World {
     let mut world = World::new();
     let Some(sector_macros) = sector_macros else {
         return world;
     };
-
-    let mut faction_ids: HashMap<String, FactionId> = HashMap::new();
-    let mut next_faction_id: u32 = 1;
 
     for batch in batches {
         for r in batch {
@@ -28,16 +28,25 @@ pub fn merge(
                 continue;
             };
             let faction = r.owner.map(|name| {
-                *faction_ids.entry(name).or_insert_with(|| {
-                    let id = FactionId(next_faction_id);
-                    next_faction_id += 1;
+                let name = name.to_lowercase();
+                *faction_strings.entry(name).or_insert_with(|| {
+                    let id = FactionId(*next_faction_id);
+                    *next_faction_id += 1;
                     id
                 })
             });
-            world.insert_entity(r.id, r.name, r.kind, faction, r.position, sec_id);
+            world.insert_entity(
+                r.id,
+                r.macro_name,
+                r.kind,
+                faction,
+                r.position,
+                sec_id,
+                r.parent_id,
+                r.code,
+            );
         }
     }
-
     world
 }
 
@@ -54,71 +63,53 @@ mod tests {
     fn merges_records_and_assigns_faction_ids() {
         let records = vec![
             EntityRecord {
-                id: 0x10,
-                name: "station_a".into(),
-                kind: LiveObjectKind::Station,
-                owner: Some("argon".into()),
-                position: glam::Vec3::ZERO,
-                sector_macro: "sa".into(),
+                id: 0x10, parent_id: None, macro_name: "station_a".into(), code: None,
+                kind: LiveObjectKind::Station, owner: Some("argon".into()),
+                position: glam::Vec3::ZERO, sector_macro: "sa".into(),
             },
             EntityRecord {
-                id: 0x11,
-                name: "ship_a".into(),
-                kind: LiveObjectKind::ShipSmall,
-                owner: Some("argon".into()),
-                position: glam::Vec3::ZERO,
-                sector_macro: "sa".into(),
-            },
-            EntityRecord {
-                id: 0x12,
-                name: "ship_b".into(),
-                kind: LiveObjectKind::ShipMedium,
-                owner: Some("teladi".into()),
-                position: glam::Vec3::ZERO,
-                sector_macro: "sb".into(),
+                id: 0x11, parent_id: Some(0x10), macro_name: "drone".into(), code: Some("D-1".into()),
+                kind: LiveObjectKind::ShipSmall, owner: Some("argon".into()),
+                position: glam::Vec3::ZERO, sector_macro: "sa".into(),
             },
         ];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
         sm.insert("sa".into(), SectorId(1));
-        sm.insert("sb".into(), SectorId(2));
-
-        let world = merge(vec![records], Some(&sm));
-        assert_eq!(world.names.len(), 3);
-        assert_eq!(world.entities_in_sector(SectorId(1)).len(), 2);
-        assert_eq!(world.entities_in_sector(SectorId(2)).len(), 1);
-        let argon = world.factions.get(&0x10).copied();
-        let teladi = world.factions.get(&0x12).copied();
-        assert!(argon.is_some());
-        assert!(teladi.is_some());
-        assert_ne!(argon, teladi);
+        let mut fs: HashMap<String, FactionId> = HashMap::new();
+        let mut next = 1u32;
+        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        assert_eq!(world.names.len(), 2);
+        assert_eq!(world.parent_of(0x11), Some(0x10));
+        assert_eq!(world.children_of(0x10), &[0x11]);
+        assert_eq!(world.codes.get(&0x11).map(String::as_str), Some("D-1"));
+        assert_eq!(fs.get("argon").copied(), Some(FactionId(1)));
+        assert_eq!(next, 2);
     }
 
     #[test]
     fn unknown_sector_drops_entity() {
         let records = vec![EntityRecord {
-            id: 0xFFFF,
-            name: "x".into(),
-            kind: LiveObjectKind::ShipSmall,
-            owner: None,
-            position: glam::Vec3::ZERO,
-            sector_macro: "unknown".into(),
+            id: 0xFFFF, parent_id: None, macro_name: "x".into(), code: None,
+            kind: LiveObjectKind::ShipSmall, owner: None,
+            position: glam::Vec3::ZERO, sector_macro: "unknown".into(),
         }];
         let sm: HashMap<String, SectorId> = HashMap::new();
-        let world = merge(vec![records], Some(&sm));
+        let mut fs = HashMap::new();
+        let mut next = 1u32;
+        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
         assert!(world.names.is_empty());
     }
 
     #[test]
     fn no_sector_macros_drops_all() {
         let records = vec![EntityRecord {
-            id: 1,
-            name: "x".into(),
-            kind: LiveObjectKind::Station,
-            owner: None,
-            position: glam::Vec3::ZERO,
-            sector_macro: "anything".into(),
+            id: 1, parent_id: None, macro_name: "x".into(), code: None,
+            kind: LiveObjectKind::Station, owner: None,
+            position: glam::Vec3::ZERO, sector_macro: "anything".into(),
         }];
-        let world = merge(vec![records], None);
+        let mut fs = HashMap::new();
+        let mut next = 1u32;
+        let world = merge(vec![records], None, &mut fs, &mut next);
         assert!(world.names.is_empty());
     }
 }
