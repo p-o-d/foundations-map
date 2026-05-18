@@ -5,7 +5,7 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
-use crate::renderer::atlas::{IconId, SuperCategory};
+use crate::renderer::atlas::IconId;
 
 pub const HALF_NORMAL:     f32 = 11.0;   // 22 px total
 pub const HALF_SELECTED:   f32 = 15.0;   // 30 px total

@@ -55,26 +55,6 @@ impl IconId {
     }
 }
 
-const GLYPHS: &[(IconId, char)] = &[
-    (IconId::Factory,        '⚙'),
-    (IconId::WharfShipyard,  '⎈'),
-    (IconId::Defense,        '⚔'),
-    (IconId::Trading,        '¤'),
-    (IconId::EquipDock,      '⚒'),
-    (IconId::HQ,             '⌂'),
-    (IconId::PlayerStation,  '◉'),
-    (IconId::GenericStation, '▦'),
-    (IconId::Capital,        '◆'),
-    (IconId::Medium,         '▶'),
-    (IconId::Small,          '▴'),
-    (IconId::Transport,      '▭'),
-    (IconId::Anomaly,        '✦'),
-    (IconId::ResourceZone,   '◎'),
-];
-
-pub fn icon_char(icon: IconId) -> char {
-    GLYPHS.iter().find(|(i, _)| *i == icon).map(|(_, c)| *c).unwrap_or('?')
-}
 
 pub fn classify_live(
     kind: LiveObjectKind,
@@ -116,27 +96,6 @@ pub fn classify_static(kind: &StaticObjectKind) -> Option<IconId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn icon_char_returns_known_glyphs() {
-        assert_eq!(icon_char(IconId::Factory), '⚙');
-        assert_eq!(icon_char(IconId::WharfShipyard), '⎈');
-        assert_eq!(icon_char(IconId::Trading), '¤');
-        assert_eq!(icon_char(IconId::Anomaly), '✦');
-    }
-
-    #[test]
-    fn glyph_table_has_one_entry_per_variant() {
-        let all: Vec<IconId> = GLYPHS.iter().map(|(i, _)| *i).collect();
-        let expected = [
-            IconId::Factory, IconId::WharfShipyard, IconId::Defense, IconId::Trading,
-            IconId::EquipDock, IconId::HQ, IconId::PlayerStation, IconId::GenericStation,
-            IconId::Capital, IconId::Medium, IconId::Small, IconId::Transport,
-            IconId::Anomaly, IconId::ResourceZone,
-        ];
-        for e in &expected { assert!(all.contains(e), "missing {:?}", e); }
-        assert_eq!(all.len(), expected.len());
-    }
 
     #[test]
     fn classify_live_routes_factory_macro_to_factory_icon() {
