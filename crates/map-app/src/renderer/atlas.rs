@@ -31,7 +31,7 @@ pub const GLYPHS: &[(IconId, char)] = &[
     (IconId::Factory,        '⚙'),
     (IconId::WharfShipyard,  '⎈'),
     (IconId::Defense,        '⚔'),
-    (IconId::Trading,        '⛁'),
+    (IconId::Trading,        '¤'),
     (IconId::EquipDock,      '⚒'),
     (IconId::HQ,             '⌂'),
     (IconId::PlayerStation,  '◉'),
