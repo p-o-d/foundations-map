@@ -1,8 +1,8 @@
-//! Icon classification + glyph lookup for screen-space painter rendering.
+//! Icon classification for the 3D sector view.
 //!
-//! No GPU atlas — icons are drawn by `egui::Painter::text` using the
-//! application's font. Each entity is classified to an `IconId`; the lookup
-//! returns the Unicode codepoint for that icon.
+//! Maps live entities and static objects to an `IconId`, and groups those into
+//! a `SuperCategory` (Station / Ship / Static). Rendering lives in
+//! `renderer::icons`, which draws each icon via `egui::Painter` primitives.
 
 use map_domain::objects::StaticObjectKind;
 use map_domain::world::LiveObjectKind;
