@@ -113,6 +113,64 @@ pub fn classify_static(kind: &StaticObjectKind) -> Option<IconId> {
     }
 }
 
+/// Rasterise every glyph in `GLYPHS` into a single R8 (alpha-only) buffer of
+/// size `ATLAS_W * ATLAS_H`. Returns `(buf, missing_count)`.
+///
+/// Each glyph is centred in its 48-pixel tile.
+pub fn rasterise_glyphs(font_bytes: &[u8]) -> (Vec<u8>, usize) {
+    use ab_glyph::{Font, FontRef, PxScale};
+
+    let font = FontRef::try_from_slice(font_bytes).expect("font_bytes is a valid TTF");
+    let scale = PxScale::from(40.0); // glyph height ~40 in a 48-px tile (4 px padding).
+
+    let mut buf = vec![0u8; ATLAS_W * ATLAS_H];
+    let mut missing = 0usize;
+
+    for (idx, (icon, ch)) in GLYPHS.iter().enumerate() {
+        let col = idx % ATLAS_COLS;
+        let row = idx / ATLAS_COLS;
+        let tile_x = (col * TILE_PX) as i32;
+        let tile_y = (row * TILE_PX) as i32;
+
+        let glyph_id = font.glyph_id(*ch);
+        if glyph_id.0 == 0 {
+            eprintln!("[render] atlas: glyph {:?} for {:?} missing in font; tile left blank", ch, icon);
+            missing += 1;
+            continue;
+        }
+
+        let glyph = glyph_id.with_scale(scale);
+        let outline = match font.outline_glyph(glyph) {
+            Some(o) => o,
+            None => continue, // whitespace / no outline
+        };
+        let bounds = outline.px_bounds();
+
+        // Centre the outline in the tile.
+        let glyph_w = bounds.width() as i32;
+        let glyph_h = bounds.height() as i32;
+        let offset_x = tile_x + (TILE_PX as i32 - glyph_w) / 2 - bounds.min.x as i32;
+        let offset_y = tile_y + (TILE_PX as i32 - glyph_h) / 2 - bounds.min.y as i32;
+
+        outline.draw(|gx, gy, coverage| {
+            let px = offset_x + bounds.min.x as i32 + gx as i32;
+            let py = offset_y + bounds.min.y as i32 + gy as i32;
+            if px < tile_x || px >= tile_x + TILE_PX as i32 { return; }
+            if py < tile_y || py >= tile_y + TILE_PX as i32 { return; }
+            let i = py as usize * ATLAS_W + px as usize;
+            let alpha = (coverage * 255.0).clamp(0.0, 255.0) as u8;
+            buf[i] = buf[i].max(alpha);
+        });
+    }
+
+    eprintln!(
+        "[render] atlas: {} glyphs baked, {} missing",
+        GLYPHS.len() - missing,
+        missing
+    );
+    (buf, missing)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +253,16 @@ mod tests {
             assert!(all.contains(e), "missing IconId in GLYPHS: {:?}", e);
         }
         assert_eq!(all.len(), expected.len(), "GLYPHS has extras or duplicates");
+    }
+
+    #[test]
+    fn rasterise_glyphs_produces_full_size_buffer_with_some_nonzero() {
+        let font_bytes = include_bytes!("../../assets/font.ttf");
+        let (buf, missing) = rasterise_glyphs(font_bytes);
+        assert_eq!(buf.len(), ATLAS_W * ATLAS_H);
+        assert!(missing <= 2, "too many missing glyphs: {}", missing);
+        let nonzero = buf.iter().filter(|&&b| b > 0).count();
+        assert!(nonzero > 1000, "expected meaningful glyph coverage, got {} pixels", nonzero);
     }
 
     #[test]
