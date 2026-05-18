@@ -252,9 +252,41 @@ fn glyph_transport(p: &Painter, c: Pos2, s: f32, col: Color32, div: Color32) {
     );
 }
 
-// stubs — filled in by Task 6
-fn glyph_anomaly(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
-fn glyph_resource_zone(_p: &Painter, _c: Pos2, _s: f32, _col: Color32) {}
+// Static glyphs — Task 6
+fn glyph_anomaly(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // 4-point starburst — concave 8-vertex polygon
+    let pts = [
+        (0.0, -5.0),
+        (1.5, -1.5),
+        (5.0, 0.0),
+        (1.5, 1.5),
+        (0.0, 5.0),
+        (-1.5, 1.5),
+        (-5.0, 0.0),
+        (-1.5, -1.5),
+    ]
+    .into_iter()
+    .map(|(x, y)| Pos2::new(c.x + x * s, c.y + y * s))
+    .collect::<Vec<_>>();
+    p.add(egui::Shape::Path(egui::epaint::PathShape {
+        points: pts,
+        closed: true,
+        fill: col,
+        stroke: egui::epaint::PathStroke::NONE,
+    }));
+}
+
+fn glyph_resource_zone(p: &Painter, c: Pos2, s: f32, col: Color32) {
+    // irregular cluster of 4 asteroid circles
+    for (dx, dy, r) in [
+        (-3.5_f32, -3.0_f32, 1.6_f32),
+        (3.0, -4.0, 1.2),
+        (0.0, 2.5, 2.0),
+        (5.0, 4.0, 1.4),
+    ] {
+        p.circle_filled(Pos2::new(c.x + dx * s, c.y + dy * s), r * s, col);
+    }
+}
 
 #[cfg(test)]
 mod tests {
