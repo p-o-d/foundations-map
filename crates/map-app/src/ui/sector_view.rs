@@ -180,6 +180,21 @@ fn build_draw_calls(
     Vec::new()
 }
 
+fn is_station_icon(icon: crate::renderer::atlas::IconId) -> bool {
+    use crate::renderer::atlas::IconId;
+    matches!(
+        icon,
+        IconId::Factory
+            | IconId::WharfShipyard
+            | IconId::Defense
+            | IconId::Trading
+            | IconId::EquipDock
+            | IconId::HQ
+            | IconId::PlayerStation
+            | IconId::GenericStation
+    )
+}
+
 /// Project each entity (static objects + live ships/stations) to screen space
 /// and paint a ring + glyph at the result. Pure 2D-over-3D — guaranteed
 /// constant pixel size regardless of camera distance.
@@ -193,7 +208,7 @@ fn draw_icons_2d(
     selected_obj: Option<ObjectId>,
     selected_entity: Option<map_domain::world::EntityId>,
 ) {
-    use crate::renderer::atlas::{classify_live, classify_static, icon_char, IconId};
+    use crate::renderer::atlas::{classify_live, classify_static, icon_char};
 
     let aspect = view_rect.width() / view_rect.height().max(1.0);
     let vp = camera.proj_matrix(aspect) * camera.view_matrix();
@@ -209,20 +224,36 @@ fn draw_icons_2d(
         ))
     };
 
-    const RADIUS_NORMAL_PX: f32 = 14.0;
-    const RADIUS_SELECTED_PX: f32 = 18.0;
+    // Stations: square ring at this half-extent. Ships: circle ring at the smaller radius.
+    const STATION_HALF_NORMAL: f32 = 14.0;
+    const STATION_HALF_SELECTED: f32 = 18.0;
+    const SHIP_RADIUS_NORMAL: f32 = 10.0;
+    const SHIP_RADIUS_SELECTED: f32 = 13.0;
     const RING_THICKNESS_NORMAL: f32 = 2.0;
     const RING_THICKNESS_SELECTED: f32 = 3.0;
     const GLYPH_FONT_PX: f32 = 18.0;
     const GLYPH_FONT_PX_SELECTED: f32 = 22.0;
     let selection_color = egui::Color32::from_rgb(255, 217, 25);
 
-    let emit = |screen: Pos2, icon: IconId, ring: egui::Color32, selected: bool| {
-        let radius = if selected { RADIUS_SELECTED_PX } else { RADIUS_NORMAL_PX };
+    let emit = |screen: Pos2, icon: crate::renderer::atlas::IconId, ring: egui::Color32, selected: bool| {
         let thickness = if selected { RING_THICKNESS_SELECTED } else { RING_THICKNESS_NORMAL };
         let ring_color = if selected { selection_color } else { ring };
         let font_px = if selected { GLYPH_FONT_PX_SELECTED } else { GLYPH_FONT_PX };
-        painter.circle_stroke(screen, radius, egui::Stroke::new(thickness, ring_color));
+
+        if is_station_icon(icon) {
+            let half = if selected { STATION_HALF_SELECTED } else { STATION_HALF_NORMAL };
+            let rect = egui::Rect::from_center_size(screen, egui::Vec2::splat(half * 2.0));
+            painter.rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(thickness, ring_color),
+                egui::StrokeKind::Outside,
+            );
+        } else {
+            let radius = if selected { SHIP_RADIUS_SELECTED } else { SHIP_RADIUS_NORMAL };
+            painter.circle_stroke(screen, radius, egui::Stroke::new(thickness, ring_color));
+        }
+
         let glyph: String = std::iter::once(icon_char(icon)).collect();
         painter.text(
             screen,
