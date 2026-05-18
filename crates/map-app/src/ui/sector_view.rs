@@ -1,8 +1,8 @@
 use crate::renderer::camera::OrbitCamera;
-use crate::renderer::gpu::{DrawCall, MeshKind, SceneCallback};
+use crate::renderer::gpu::{DrawCall, SceneCallback};
 use crate::theme;
 use egui::{Pos2, Rect, Sense, Vec2};
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 use map_domain::ids::ObjectId;
 use map_domain::objects::StaticObjectKind;
 use map_domain::universe::Sector;
@@ -105,14 +105,21 @@ impl SectorView3D {
             })
             .collect();
 
+        // Build sprite instances (atlas lookup is cheap — small HashMap of 14 entries).
+        let atlas = crate::renderer::atlas::AtlasLookup::build();
+        let sprite_instances = sector
+            .map(|s| build_sprite_instances(s, world, universe, selected_obj, selected_entity, &atlas))
+            .unwrap_or_default();
+        let viewport = [view_rect.width(), view_rect.height()];
+
         // Push wgpu paint callback for the 3D view rect
         let cb = eframe::egui_wgpu::Callback::new_paint_callback(
             view_rect,
             SceneCallback {
                 draw_calls,
-                view_proj: Mat4::IDENTITY,
-                viewport: [view_rect.width(), view_rect.height()],
-                sprite_instances: Vec::new(),
+                view_proj: vp,
+                viewport,
+                sprite_instances,
             },
         );
         ui.painter().add(cb);
@@ -158,103 +165,74 @@ impl SectorView3D {
 
 /// Build per-object draw calls with model matrix (translate + scale) and color.
 fn build_draw_calls(
-    sector: &Sector,
+    _sector: &Sector,
+    _world: Option<&map_domain::world::World>,
+    _universe: &map_domain::universe::Universe,
+    _selected_obj: Option<ObjectId>,
+    _selected_entity: Option<map_domain::world::EntityId>,
+) -> Vec<DrawCall> {
+    // Sprites now own all entity rendering (built in build_sprite_instances).
+    // Gates + highways render through draw_gates_2d. Mesh pipeline is currently
+    // idle; kept in place for potential future grid / ground-plane work.
+    Vec::new()
+}
+
+fn build_sprite_instances(
+    sector: &map_domain::universe::Sector,
     world: Option<&map_domain::world::World>,
     universe: &map_domain::universe::Universe,
     selected_obj: Option<ObjectId>,
     selected_entity: Option<map_domain::world::EntityId>,
-) -> Vec<DrawCall> {
-    let mut calls: Vec<DrawCall> = Vec::new();
+    atlas: &crate::renderer::atlas::AtlasLookup,
+) -> Vec<crate::renderer::sprite::SpriteInstance> {
+    use crate::renderer::atlas::{classify_live, classify_static};
+    use crate::renderer::sprite::SpriteInstance;
 
-    // Static objects (existing path; excludes gates + highways which render in 2D).
+    let mut out: Vec<SpriteInstance> = Vec::new();
+
     for obj in &sector.static_objects {
-        if matches!(obj.kind, StaticObjectKind::Gate | StaticObjectKind::Highway) {
-            continue;
-        }
-        let scale = match obj.kind {
-            StaticObjectKind::Station => 3.0,
-            StaticObjectKind::Gate => 4.0,
-            StaticObjectKind::ResourceZone => 8.0,
-            StaticObjectKind::Anomaly => 2.0,
-            StaticObjectKind::Highway => 4.0,
-        };
-        let mesh = match obj.kind {
-            StaticObjectKind::Station => MeshKind::Box,
-            StaticObjectKind::Gate => MeshKind::Ring,
-            StaticObjectKind::ResourceZone => MeshKind::Sphere,
-            StaticObjectKind::Anomaly => MeshKind::Sphere,
-            StaticObjectKind::Highway => MeshKind::Ring,
-        };
-        let color = if selected_obj == Some(obj.id) {
-            [1.0, 0.8, 0.1, 1.0]
-        } else {
-            kind_color(&obj.kind)
-        };
-        let rotation = obj
-            .rotation
-            .map(|(p, y, r)| {
-                Mat4::from_euler(
-                    glam::EulerRot::YXZ,
-                    y.to_radians(),
-                    p.to_radians(),
-                    r.to_radians(),
-                )
-            })
-            .unwrap_or(Mat4::IDENTITY);
-        let model =
-            Mat4::from_translation(obj.position) * rotation * Mat4::from_scale(Vec3::splat(scale));
-        calls.push(DrawCall {
-            kind: mesh,
-            mvp: model,
-            color,
-        });
+        let Some(icon) = classify_static(&obj.kind) else { continue };
+        let ring_color = obj
+            .faction
+            .map(|f| crate::colors::faction_color(universe, f))
+            .unwrap_or(crate::theme::TEXT_MUTED);
+        let ring_rgba = color_to_rgba(ring_color);
+        let selected = selected_obj == Some(obj.id);
+        out.push(SpriteInstance::from_target(obj.position, icon, ring_rgba, selected, atlas));
     }
 
-    // Live entities: top-level only (parent.is_none()).
     if let Some(world) = world {
-        use map_domain::world::LiveObjectKind;
+        let mut fid_to_str: std::collections::HashMap<map_domain::ids::FactionId, &str> =
+            std::collections::HashMap::new();
+        for (k, v) in &universe.faction_strings {
+            fid_to_str.insert(*v, k.as_str());
+        }
+
         for &eid in world.entities_in_sector(sector.id) {
-            if world.parent_of(eid).is_some() {
-                continue; // docked / subordinate — invisible in scene, listed in panel
-            }
-            let Some(&pos) = world.positions.get(&eid) else {
-                continue;
-            };
-            let kind = world.kinds.get(&eid);
-            let (mesh, scale) = match kind {
-                Some(LiveObjectKind::Station) => (MeshKind::Box, 4.0),
-                Some(LiveObjectKind::ShipExtraLarge) => (MeshKind::Box, 2.5),
-                Some(LiveObjectKind::ShipLarge) => (MeshKind::Box, 1.5),
-                Some(LiveObjectKind::ShipMedium) => (MeshKind::Sphere, 1.0),
-                Some(LiveObjectKind::ShipSmall) => (MeshKind::Sphere, 0.5),
-                None => continue,
-            };
-            let fcolor = world
-                .factions
-                .get(&eid)
-                .copied()
-                .map(|fid| crate::colors::faction_color(universe, fid))
+            if world.parent_of(eid).is_some() { continue; }
+            let Some(&pos) = world.positions.get(&eid) else { continue };
+            let Some(kind) = world.kinds.get(&eid).cloned() else { continue };
+            let macro_name = world.names.get(&eid).map(String::as_str).unwrap_or("");
+            let owner_str = world.factions.get(&eid).and_then(|f| fid_to_str.get(f).copied());
+            let icon = classify_live(kind, macro_name, owner_str);
+            let ring_color = world.factions.get(&eid).copied()
+                .map(|f| crate::colors::faction_color(universe, f))
                 .unwrap_or(crate::theme::TEXT_MUTED);
-            let base = [
-                fcolor.r() as f32 / 255.0,
-                fcolor.g() as f32 / 255.0,
-                fcolor.b() as f32 / 255.0,
-                1.0,
-            ];
-            let color = if selected_entity == Some(eid) {
-                [1.0, 0.8, 0.1, 1.0]
-            } else {
-                base
-            };
-            let model = Mat4::from_translation(pos) * Mat4::from_scale(Vec3::splat(scale));
-            calls.push(DrawCall {
-                kind: mesh,
-                mvp: model,
-                color,
-            });
+            let ring_rgba = color_to_rgba(ring_color);
+            let selected = selected_entity == Some(eid);
+            out.push(SpriteInstance::from_target(pos, icon, ring_rgba, selected, atlas));
         }
     }
-    calls
+    out
+}
+
+fn color_to_rgba(c: egui::Color32) -> [f32; 4] {
+    [
+        c.r() as f32 / 255.0,
+        c.g() as f32 / 255.0,
+        c.b() as f32 / 255.0,
+        c.a() as f32 / 255.0,
+    ]
 }
 
 fn kind_color(kind: &StaticObjectKind) -> [f32; 4] {
