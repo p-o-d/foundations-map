@@ -15,7 +15,7 @@ pub const DOT_RADIUS:      f32 = 1.6;
 pub const DOT_RADIUS_SEL:  f32 = 2.0;
 
 pub const SELECTION_COLOR: Color32 = Color32::from_rgb(255, 217, 25);
-pub const STATIC_FRAME_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
+const STATIC_FRAME_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
 
 /// Draw the square outline frame used by all 8 station icons.
 pub fn draw_station_frame(
@@ -163,7 +163,9 @@ fn glyph_equip_dock(p: &Painter, c: Pos2, s: f32, col: Color32) {
 }
 
 fn glyph_hq(p: &Painter, c: Pos2, s: f32, col: Color32, dot_color: Color32) {
-    // pyramid + command dot (dot uses frame colour, so player-owned HQ shows white dot)
+    // pyramid + command dot. Dot uses frame_color — faction tint (normal) or
+    // selection yellow. Player-owned stations route to PlayerStation, not HQ,
+    // so the white-frame case never lands here.
     let pts = vec![
         Pos2::new(c.x + 0.0 * s, c.y - 3.5 * s),
         Pos2::new(c.x + 5.0 * s, c.y + 4.0 * s),
