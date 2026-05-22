@@ -25,6 +25,10 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
     let mut stack: Vec<Pending> = Vec::new();
     // Depth at which we are currently inside an <offset> element; None otherwise.
     let mut offset_depth: Option<u32> = None;
+    // Depth at which we are currently inside an <offers> element; None otherwise.
+    // <trade> elements inside this scope (with a buyer= or seller= attribute)
+    // are offers, not in-flight trades.
+    let mut in_offers_depth: Option<u32> = None;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -59,6 +63,12 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
             Ok(Event::End(ref e)) if e.name().as_ref() == b"offset" => {
                 offset_depth = None;
             }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"offers" => {
+                in_offers_depth = Some(comp_depth);
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"offers" => {
+                in_offers_depth = None;
+            }
             Ok(Event::Empty(ref e)) if e.name().as_ref() == b"position" => {
                 // Only attribute position to the top pending entity if THIS <offset> sits
                 // immediately inside it (open_depth == offset_depth, since <offset> is a
@@ -71,6 +81,15 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                         let z = attr_f32(e, b"z").unwrap_or(0.0);
                         // X4 stores positions in metres; convert to km.
                         top.position = Some(Vec3::new(x / 1000.0, y / 1000.0, z / 1000.0));
+                    }
+                }
+            }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"trade" && in_offers_depth.is_some() =>
+            {
+                if let Some(offer) = build_offer(e) {
+                    if let Some(top) = stack.last_mut() {
+                        top.trade_offers.push(offer);
                     }
                 }
             }
@@ -141,6 +160,35 @@ fn attr_f32(e: &BytesStart<'_>, name: &[u8]) -> Option<f32> {
         .filter_map(Result::ok)
         .find(|a| a.key.as_ref() == name)
         .and_then(|a| std::str::from_utf8(&a.value).ok()?.parse::<f32>().ok())
+}
+
+fn attr_i64(e: &BytesStart<'_>, name: &[u8]) -> Option<i64> {
+    e.attributes()
+        .filter_map(Result::ok)
+        .find(|a| a.key.as_ref() == name)
+        .and_then(|a| std::str::from_utf8(&a.value).ok()?.parse::<i64>().ok())
+}
+
+fn build_offer(e: &BytesStart<'_>) -> Option<TradeOffer> {
+    use map_domain::world::TradeDirection;
+    let direction = if attr_str(e, b"buyer").is_some() {
+        TradeDirection::Buy
+    } else if attr_str(e, b"seller").is_some() {
+        TradeDirection::Sell
+    } else {
+        return None;
+    };
+    let ware_id = attr_str(e, b"ware")?;
+    let price = attr_i64(e, b"price").unwrap_or(0);
+    let amount = attr_i64(e, b"amount").unwrap_or(0);
+    let desired = attr_i64(e, b"desired").unwrap_or(0);
+    Some(TradeOffer {
+        ware_id,
+        direction,
+        price,
+        amount,
+        desired,
+    })
 }
 
 #[cfg(test)]
@@ -249,5 +297,83 @@ mod tests {
         let out = parse_sector_chunk(chunk, "m");
         let st = out.iter().find(|r| r.id == 0xA).unwrap();
         assert!((st.position.x - 7.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn parses_station_trade_offers() {
+        use map_domain::world::TradeDirection;
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="station" macro="st" owner="argon" id="[0x100]">
+    <offset><position x="0" y="0" z="0"/></offset>
+    <trade>
+      <reservations>
+        <reservation id="[0x900]" buyer="[0x999]" partner="[0x100]" ware="ignored" price="1" amount="1" desired="1"/>
+      </reservations>
+      <offers>
+        <production>
+          <trade id="[0x1]" buyer="[0x100]" ware="energycells" price="1092" amount="0"/>
+          <trade id="[0x2]" buyer="[0x100]" ware="spices" price="2800" amount="4672" desired="4672"/>
+          <trade id="[0x3]" seller="[0x100]" ware="medicalsupplies" price="7174" amount="6299"/>
+        </production>
+      </offers>
+    </trade>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let station = out.iter().find(|r| r.id == 0x100).expect("station present");
+        assert_eq!(station.trade_offers.len(), 3, "expected 3 offers, got {:?}", station.trade_offers);
+
+        let ec = station.trade_offers.iter().find(|o| o.ware_id == "energycells").unwrap();
+        assert_eq!(ec.direction, TradeDirection::Buy);
+        assert_eq!(ec.price, 1092);
+        assert_eq!(ec.amount, 0);
+        assert_eq!(ec.desired, 0, "desired absent ⇒ 0");
+
+        let sp = station.trade_offers.iter().find(|o| o.ware_id == "spices").unwrap();
+        assert_eq!(sp.direction, TradeDirection::Buy);
+        assert_eq!(sp.desired, 4672);
+
+        let med = station.trade_offers.iter().find(|o| o.ware_id == "medicalsupplies").unwrap();
+        assert_eq!(med.direction, TradeDirection::Sell);
+        assert_eq!(med.amount, 6299);
+    }
+
+    #[test]
+    fn reservation_outside_offers_is_not_a_trade_offer() {
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="station" macro="st" owner="argon" id="[0x100]">
+    <offset><position x="0" y="0" z="0"/></offset>
+    <trade>
+      <reservations>
+        <reservation id="[0x900]" buyer="[0x999]" partner="[0x100]" ware="ignored" price="1" amount="1" desired="1"/>
+      </reservations>
+    </trade>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let station = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert!(station.trade_offers.is_empty());
+    }
+
+    #[test]
+    fn docked_ship_inherits_no_offers() {
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="station" macro="st" owner="argon" id="[0x100]">
+    <offset><position x="0" y="0" z="0"/></offset>
+    <trade><offers><production>
+      <trade id="[0x1]" buyer="[0x100]" ware="energycells" price="50" amount="0"/>
+    </production></offers></trade>
+    <connections>
+      <component class="ship_xs" macro="drone" owner="argon" id="[0x200]">
+        <offset><position x="0" y="0" z="0"/></offset>
+      </component>
+    </connections>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let drone = out.iter().find(|r| r.id == 0x200).unwrap();
+        assert!(drone.trade_offers.is_empty());
+        let station = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert_eq!(station.trade_offers.len(), 1);
     }
 }
