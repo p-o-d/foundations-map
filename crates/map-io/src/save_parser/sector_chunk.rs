@@ -179,7 +179,7 @@ fn build_offer(e: &BytesStart<'_>) -> Option<TradeOffer> {
     } else {
         return None;
     };
-    let ware_id = attr_str(e, b"ware")?;
+    let ware_id = attr_str(e, b"ware")?.to_lowercase();
     let price = attr_i64(e, b"price").unwrap_or(0);
     let amount = attr_i64(e, b"amount").unwrap_or(0);
     let desired = attr_i64(e, b"desired").unwrap_or(0);
