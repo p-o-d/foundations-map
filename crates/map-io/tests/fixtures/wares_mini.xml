@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wares>
+  <ware id="energycells" name="{20201,1101}" tags="economy"/>
+  <ware id="medicalsupplies" name="{20201,1102}" tags="economy"/>
+  <ware id="literalwell" name="Hand-Written Name" tags="misc"/>
+  <ware id="unknownware" name="{20201,9999}" tags="economy"/>
+  <missingid name="{20201,1101}"/>
+</wares>

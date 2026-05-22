@@ -1764,6 +1764,50 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
     Ok(objects)
 }
 
+/// Parse `libraries/wares.xml`. Returns `ware_id (lowercase) → display name`.
+///
+/// `name="{page,id}"` resolved via `translations`; literal names returned as-is;
+/// unknown translation keys fall back to the raw ware id so the UI is never empty.
+pub fn parse_ware_names_xml(
+    xml: &[u8],
+    translations: &HashMap<(u32, u32), String>,
+) -> HashMap<String, String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut out: HashMap<String, String> = HashMap::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"ware" =>
+            {
+                let Some(id) = attr_value(e, b"id") else {
+                    continue;
+                };
+                let id_lc = id.to_lowercase();
+                let name_attr = attr_value(e, b"name").unwrap_or_default();
+                let display = if let Some((pid, tid)) = parse_page_text_ref(&name_attr) {
+                    translations
+                        .get(&(pid, tid))
+                        .cloned()
+                        .unwrap_or_else(|| id_lc.clone())
+                } else if !name_attr.is_empty() {
+                    name_attr
+                } else {
+                    id_lc.clone()
+                };
+                out.insert(id_lc, display);
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1790,5 +1834,28 @@ mod tests {
 </language>"#;
         let map = super::parse_translations_xml(xml).unwrap();
         assert!(map.get(&(20201, 9999)).is_none());
+    }
+
+    #[test]
+    fn parse_ware_names_resolves_translations_literals_and_falls_back() {
+        use std::collections::HashMap;
+        let xml = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/wares_mini.xml"),
+        )
+        .unwrap();
+        let mut translations: HashMap<(u32, u32), String> = HashMap::new();
+        translations.insert((20201, 1101), "Energy Cells".into());
+        translations.insert((20201, 1102), "Medical Supplies".into());
+
+        let names = super::parse_ware_names_xml(&xml, &translations);
+
+        assert_eq!(names.get("energycells").map(String::as_str), Some("Energy Cells"));
+        assert_eq!(names.get("medicalsupplies").map(String::as_str), Some("Medical Supplies"));
+        assert_eq!(names.get("literalwell").map(String::as_str), Some("Hand-Written Name"));
+        // Unknown translation key falls back to raw ware id.
+        assert_eq!(names.get("unknownware").map(String::as_str), Some("unknownware"));
+        // <missingid> has no `id` attribute — skipped.
+        assert!(names.get("missingid").is_none());
     }
 }
