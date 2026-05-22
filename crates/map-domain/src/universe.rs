@@ -57,6 +57,9 @@ pub struct Universe {
     pub faction_strings: std::collections::HashMap<String, FactionId>,
     /// FactionId → resolved display name + game palette colour.
     pub faction_table: std::collections::HashMap<FactionId, FactionMeta>,
+    /// Lowercase ware id (e.g. "energycells") → display name (e.g. "Energy Cells").
+    /// Built once at galaxy load from `libraries/wares.xml`. Empty if parse failed.
+    pub ware_names: std::collections::HashMap<String, String>,
 }
 
 impl Universe {
@@ -91,6 +94,7 @@ mod tests {
             sector_macros: HashMap::new(),
             faction_strings: HashMap::new(),
             faction_table: HashMap::new(),
+            ware_names: HashMap::new(),
             sectors: vec![
                 Sector {
                     id: a,
@@ -154,5 +158,13 @@ mod tests {
         );
         assert_eq!(u.faction_strings.get("argon"), Some(&FactionId(1)));
         assert_eq!(u.faction_table.get(&FactionId(1)).unwrap().display_name, "Argon Federation");
+    }
+
+    #[test]
+    fn ware_names_can_be_populated() {
+        let mut u = Universe::default();
+        u.ware_names.insert("energycells".into(), "Energy Cells".into());
+        assert_eq!(u.ware_names.get("energycells").map(String::as_str), Some("Energy Cells"));
+        assert!(u.ware_names.get("missing").is_none());
     }
 }
