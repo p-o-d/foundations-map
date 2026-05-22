@@ -346,8 +346,8 @@ fn render_trade_section(
             .cloned()
             .unwrap_or_else(|| o.ware_id.clone())
     };
-    buys.sort_by(|a, b| name_for(a).cmp(&name_for(b)));
-    sells.sort_by(|a, b| name_for(a).cmp(&name_for(b)));
+    buys.sort_by_cached_key(|o| name_for(o));
+    sells.sort_by_cached_key(|o| name_for(o));
 
     render_offer_group(ui, "BUYS", &buys, &name_for);
     render_offer_group(ui, "SELLS", &sells, &name_for);
@@ -413,5 +413,21 @@ mod tests {
         assert_eq!(crate::colors::strip_macro("cluster_709_sector001_macro"), "cluster 709 sector001");
         assert_eq!(crate::colors::strip_macro("argon_prime_macro"), "argon prime");
         assert_eq!(crate::colors::strip_macro("no_suffix"), "no suffix");
+    }
+
+    #[test]
+    fn fmt_thousands_formats_with_separators() {
+        assert_eq!(fmt_thousands(0), "0");
+        assert_eq!(fmt_thousands(7), "7");
+        assert_eq!(fmt_thousands(100), "100");
+        assert_eq!(fmt_thousands(1_000), "1,000");
+        assert_eq!(fmt_thousands(1_234), "1,234");
+        assert_eq!(fmt_thousands(1_234_567), "1,234,567");
+        assert_eq!(fmt_thousands(-1_000), "-1,000");
+        assert_eq!(fmt_thousands(i64::MIN), format!("-{}", {
+            // The function uses unsigned_abs(), so this should not panic.
+            // i64::MIN.unsigned_abs() == 9_223_372_036_854_775_808
+            "9,223,372,036,854,775,808"
+        }));
     }
 }
