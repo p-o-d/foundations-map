@@ -4,7 +4,7 @@
 //! `Vec<EntityRecord>` with ships and stations. No shared state.
 
 use glam::Vec3;
-use map_domain::world::LiveObjectKind;
+use map_domain::world::{LiveObjectKind, TradeOffer};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
@@ -37,7 +37,7 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
             Ok(Event::End(ref e)) if e.name().as_ref() == b"component" => {
                 if let Some(top) = stack.last() {
                     if top.open_depth == comp_depth {
-                        let p = stack.pop().unwrap();
+                        let mut p = stack.pop().unwrap();
                         out.push(EntityRecord {
                             id: p.id,
                             parent_id: p.parent_id,
@@ -47,6 +47,7 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                             owner: p.owner,
                             position: p.position.unwrap_or(Vec3::ZERO),
                             sector_macro: sector_macro.to_string(),
+                            trade_offers: std::mem::take(&mut p.trade_offers),
                         });
                     }
                 }
@@ -91,6 +92,7 @@ struct Pending {
     kind: LiveObjectKind,
     owner: Option<String>,
     position: Option<Vec3>,
+    trade_offers: Vec<TradeOffer>,
 }
 
 fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Option<Pending> {
@@ -118,6 +120,7 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         kind,
         owner,
         position: None,
+        trade_offers: Vec::new(),
     })
 }
 
