@@ -101,10 +101,15 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
 
     // Ware id → display name (e.g. "energycells" → "Energy Cells"). Non-fatal:
     // missing or unparseable wares.xml leaves `ware_names` empty, UI falls back
-    // to raw ids.
-    let ware_names = crate::cat_reader::read_game_file(game_dir, "libraries/wares.xml")
-        .map(|data| parse_ware_names_xml(&data, &translations))
-        .unwrap_or_default();
+    // to raw ids. Multi-archive read for DLC extensions; first occurrence wins
+    // (same convention as factions / colors).
+    let mut ware_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/wares.xml") {
+        for (k, v) in parse_ware_names_xml(&data, &translations) {
+            ware_names.entry(k).or_insert(v);
+        }
+    }
     eprintln!("[map] Ware names: {}", ware_names.len());
 
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
