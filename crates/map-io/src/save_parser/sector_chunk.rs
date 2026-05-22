@@ -25,10 +25,9 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
     let mut stack: Vec<Pending> = Vec::new();
     // Depth at which we are currently inside an <offset> element; None otherwise.
     let mut offset_depth: Option<u32> = None;
-    // Depth at which we are currently inside an <offers> element; None otherwise.
-    // <trade> elements inside this scope (with a buyer= or seller= attribute)
-    // are offers, not in-flight trades.
-    let mut in_offers_depth: Option<u32> = None;
+    // True while inside an `<offers>` element. `<trade>` elements inside this
+    // scope (with a buyer= or seller= attribute) are offers, not in-flight trades.
+    let mut in_offers: bool = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -64,10 +63,10 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                 offset_depth = None;
             }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"offers" => {
-                in_offers_depth = Some(comp_depth);
+                in_offers = true;
             }
             Ok(Event::End(ref e)) if e.name().as_ref() == b"offers" => {
-                in_offers_depth = None;
+                in_offers = false;
             }
             Ok(Event::Empty(ref e)) if e.name().as_ref() == b"position" => {
                 // Only attribute position to the top pending entity if THIS <offset> sits
@@ -85,7 +84,7 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                 }
             }
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
-                if e.name().as_ref() == b"trade" && in_offers_depth.is_some() =>
+                if e.name().as_ref() == b"trade" && in_offers =>
             {
                 if let Some(offer) = build_offer(e) {
                     if let Some(top) = stack.last_mut() {
@@ -171,6 +170,8 @@ fn attr_i64(e: &BytesStart<'_>, name: &[u8]) -> Option<i64> {
 
 fn build_offer(e: &BytesStart<'_>) -> Option<TradeOffer> {
     use map_domain::world::TradeDirection;
+    // Real X4 data emits exactly one of buyer= / seller=; if somehow both,
+    // buyer wins (we never observed this in saves).
     let direction = if attr_str(e, b"buyer").is_some() {
         TradeDirection::Buy
     } else if attr_str(e, b"seller").is_some() {
