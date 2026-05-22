@@ -1800,7 +1800,6 @@ pub fn parse_ware_names_xml(
                 out.insert(id_lc, display);
             }
             Ok(Event::Eof) => break,
-            Err(_) => break,
             _ => {}
         }
         buf.clear();
@@ -1810,6 +1809,8 @@ pub fn parse_ware_names_xml(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     #[test]
     fn parse_translations_xml_includes_wares_page_20201() {
         let xml = r#"<?xml version="1.0"?>
@@ -1838,7 +1839,6 @@ mod tests {
 
     #[test]
     fn parse_ware_names_resolves_translations_literals_and_falls_back() {
-        use std::collections::HashMap;
         let xml = std::fs::read(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/wares_mini.xml"),
