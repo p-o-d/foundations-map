@@ -732,8 +732,8 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     current_page = attr_value(e, b"id").and_then(|s| s.parse().ok());
                 }
                 b"t" => {
-                    // 20003 = cluster names, 20004 = sector names
-                    if matches!(current_page, Some(20003 | 20004)) {
+                    // 20003 = cluster names, 20004 = sector names, 20201 = ware names
+                    if matches!(current_page, Some(20003 | 20004 | 20201)) {
                         current_text_id = attr_value(e, b"id").and_then(|s| s.parse().ok());
                     }
                 }
@@ -745,7 +745,9 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     let decoded = e.decode().unwrap_or_default();
                     let content =
                         quick_xml::escape::unescape(&decoded).unwrap_or_else(|_| decoded.clone());
-                    if let Some(name) = extract_last_parenthetical(&content) {
+                    let name = extract_last_parenthetical(&content)
+                        .unwrap_or_else(|| content.trim().to_string());
+                    if !name.is_empty() {
                         translations.insert((page_id, text_id), name);
                     }
                     current_text_id = None;
@@ -1752,4 +1754,21 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
     }
 
     Ok(objects)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parse_translations_xml_includes_wares_page_20201() {
+        let xml = r#"<?xml version="1.0"?>
+<language id="44">
+  <page id="20201">
+    <t id="1101">Energy Cells</t>
+    <t id="1102">Medical Supplies</t>
+  </page>
+</language>"#;
+        let map = super::parse_translations_xml(xml).unwrap();
+        assert_eq!(map.get(&(20201, 1101)).map(String::as_str), Some("Energy Cells"));
+        assert_eq!(map.get(&(20201, 1102)).map(String::as_str), Some("Medical Supplies"));
+    }
 }
