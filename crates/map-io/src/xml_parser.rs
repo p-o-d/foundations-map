@@ -712,8 +712,10 @@ fn parse_sector_name_refs_xml(xml: &str) -> Result<HashMap<String, (u32, u32)>, 
 
 /// Translation file: (page_id, text_id) → display name string.
 ///
-/// Reads entries in page 20004 (sector names).  Each `<t id="N">` value has the
-/// form `{ref1} {ref2}(Sector Name)` — the last parenthetical is the display name.
+/// Reads entries in pages 20003 (cluster names), 20004 (sector names), and
+/// 20201 (ware names). Sector/cluster entries have the form
+/// `{ref1} {ref2}(Display Name)` — the last parenthetical is taken. Ware
+/// entries are plain text (`Energy Cells`) and are kept as-is.
 fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, ParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -745,9 +747,15 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     let decoded = e.decode().unwrap_or_default();
                     let content =
                         quick_xml::escape::unescape(&decoded).unwrap_or_else(|_| decoded.clone());
-                    let name = extract_last_parenthetical(&content)
-                        .unwrap_or_else(|| content.trim().to_string());
-                    if !name.is_empty() {
+                    // 20003/20004: parenthetical extraction (sector/cluster names).
+                    // 20201: plain text (ware names have no parenthetical).
+                    let name = if page_id == 20201 {
+                        let t = content.trim().to_string();
+                        if t.is_empty() { None } else { Some(t) }
+                    } else {
+                        extract_last_parenthetical(&content)
+                    };
+                    if let Some(name) = name {
                         translations.insert((page_id, text_id), name);
                     }
                     current_text_id = None;
@@ -1770,5 +1778,17 @@ mod tests {
         let map = super::parse_translations_xml(xml).unwrap();
         assert_eq!(map.get(&(20201, 1101)).map(String::as_str), Some("Energy Cells"));
         assert_eq!(map.get(&(20201, 1102)).map(String::as_str), Some("Medical Supplies"));
+    }
+
+    #[test]
+    fn parse_translations_xml_skips_empty_ware_entry() {
+        let xml = r#"<?xml version="1.0"?>
+<language id="44">
+  <page id="20201">
+    <t id="9999"></t>
+  </page>
+</language>"#;
+        let map = super::parse_translations_xml(xml).unwrap();
+        assert!(map.get(&(20201, 9999)).is_none());
     }
 }
