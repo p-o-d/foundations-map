@@ -35,8 +35,10 @@ pub fn merge(
                     id
                 })
             });
+            let entity_id = r.id;
+            let trade_offers = r.trade_offers;
             world.insert_entity(
-                r.id,
+                entity_id,
                 r.macro_name,
                 r.kind,
                 faction,
@@ -45,6 +47,9 @@ pub fn merge(
                 r.parent_id,
                 r.code,
             );
+            if !trade_offers.is_empty() {
+                world.trade_offers.insert(entity_id, trade_offers);
+            }
         }
     }
     world
@@ -115,5 +120,36 @@ mod tests {
         let mut next = 1u32;
         let world = merge(vec![records], None, &mut fs, &mut next);
         assert!(world.names.is_empty());
+    }
+
+    #[test]
+    fn trade_offers_propagated_to_world() {
+        use map_domain::world::{TradeDirection, TradeOffer};
+        let records = vec![EntityRecord {
+            id: 0x10,
+            parent_id: None,
+            macro_name: "station_a".into(),
+            code: None,
+            kind: LiveObjectKind::Station,
+            owner: Some("argon".into()),
+            position: glam::Vec3::ZERO,
+            sector_macro: "sa".into(),
+            trade_offers: vec![TradeOffer {
+                ware_id: "energycells".into(),
+                direction: TradeDirection::Buy,
+                price: 1092,
+                amount: 0,
+                desired: 1200,
+            }],
+        }];
+        let mut sm: HashMap<String, SectorId> = HashMap::new();
+        sm.insert("sa".into(), SectorId(1));
+        let mut fs: HashMap<String, FactionId> = HashMap::new();
+        let mut next = 1u32;
+        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        let offers = world.trade_offers_of(0x10);
+        assert_eq!(offers.len(), 1);
+        assert_eq!(offers[0].ware_id, "energycells");
+        assert_eq!(offers[0].direction, TradeDirection::Buy);
     }
 }
