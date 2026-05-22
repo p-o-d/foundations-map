@@ -165,6 +165,17 @@ impl SectorPanel {
                                     format!("Pos: x {:.1} y {:.1} z {:.1} km", pos.x, pos.y, pos.z),
                                 );
                             }
+                            if matches!(
+                                world.kinds.get(&eid),
+                                Some(map_domain::world::LiveObjectKind::Station)
+                            ) {
+                                let offers = world.trade_offers_of(eid);
+                                if !offers.is_empty() {
+                                    ui.add_space(6.0);
+                                    ui.colored_label(theme::TEXT_MUTED, "TRADE");
+                                    render_trade_section(ui, offers, universe);
+                                }
+                            }
                             let kids = world.children_of(eid);
                             if !kids.is_empty() {
                                 egui::CollapsingHeader::new(format!("DOCKED ({})", kids.len()))
@@ -297,6 +308,95 @@ fn kind_label(kind: &map_domain::objects::StaticObjectKind) -> &'static str {
         Anomaly => "Anomaly",
         Highway => "Highway",
     }
+}
+
+fn fmt_thousands(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "" };
+    let abs = n.unsigned_abs().to_string();
+    let bytes = abs.as_bytes();
+    let mut out = String::with_capacity(bytes.len() + bytes.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i != 0 && (bytes.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    format!("{sign}{out}")
+}
+
+fn render_trade_section(
+    ui: &mut egui::Ui,
+    offers: &[map_domain::world::TradeOffer],
+    universe: &map_domain::universe::Universe,
+) {
+    use map_domain::world::TradeDirection;
+
+    let mut buys: Vec<&map_domain::world::TradeOffer> = offers
+        .iter()
+        .filter(|o| o.direction == TradeDirection::Buy)
+        .collect();
+    let mut sells: Vec<&map_domain::world::TradeOffer> = offers
+        .iter()
+        .filter(|o| o.direction == TradeDirection::Sell)
+        .collect();
+    let name_for = |o: &map_domain::world::TradeOffer| -> String {
+        universe
+            .ware_names
+            .get(&o.ware_id)
+            .cloned()
+            .unwrap_or_else(|| o.ware_id.clone())
+    };
+    buys.sort_by(|a, b| name_for(a).cmp(&name_for(b)));
+    sells.sort_by(|a, b| name_for(a).cmp(&name_for(b)));
+
+    render_offer_group(ui, "BUYS", &buys, &name_for);
+    render_offer_group(ui, "SELLS", &sells, &name_for);
+}
+
+fn render_offer_group(
+    ui: &mut egui::Ui,
+    label: &str,
+    offers: &[&map_domain::world::TradeOffer],
+    name_for: &dyn Fn(&map_domain::world::TradeOffer) -> String,
+) {
+    if offers.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new(format!("{} ({})", label, offers.len()))
+        .default_open(true)
+        .show(ui, |ui| {
+            egui::Grid::new(format!("trade-grid-{}", label))
+                .num_columns(3)
+                .spacing([10.0, 2.0])
+                .show(ui, |ui| {
+                    for o in offers {
+                        ui.colored_label(theme::TEXT_PRIMARY, name_for(o));
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.colored_label(
+                                    theme::TEXT_MUTED,
+                                    format!("{} Cr", fmt_thousands(o.price)),
+                                );
+                            },
+                        );
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.colored_label(
+                                    theme::TEXT_MUTED,
+                                    format!(
+                                        "{} / {}",
+                                        fmt_thousands(o.amount),
+                                        fmt_thousands(o.desired),
+                                    ),
+                                );
+                            },
+                        );
+                        ui.end_row();
+                    }
+                });
+        });
 }
 
 #[cfg(test)]
