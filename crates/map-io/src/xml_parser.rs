@@ -758,10 +758,10 @@ fn parse_sector_name_refs_xml(xml: &str) -> Result<HashMap<String, (u32, u32)>, 
 
 /// Translation file: (page_id, text_id) → display name string.
 ///
-/// Retains every page. Pages 20003 (cluster names) and 20004 (sector names)
-/// use the `{ref1} {ref2}(Display Name)` convention — only the parenthetical
-/// is stored. Every other page (ware names, ship class names, lore text, …)
-/// is kept as plain trimmed text.
+/// Retains every page as plain trimmed text. Composite entries on pages 20003
+/// (cluster names) and 20004 (sector names) like `{20005,6002}(Grand Exchange)`
+/// are stored verbatim so the runtime resolver can substitute `{p,t}` refs
+/// against the chosen locale's translations and apply X4 display extraction.
 fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, ParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -790,18 +790,12 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     let decoded = e.decode().unwrap_or_default();
                     let content =
                         quick_xml::escape::unescape(&decoded).unwrap_or_else(|_| decoded.clone());
-                    // 20003 + 20004 (cluster / sector names) follow the
-                    // "{ref} {ref}(Display Name)" convention — take only the
-                    // parenthetical. Everything else (ware names, ship class
-                    // names, lore text, …) is plain text.
-                    let name = if matches!(page_id, 20003 | 20004) {
-                        extract_last_parenthetical(&content)
-                    } else {
-                        let t = content.trim().to_string();
-                        if t.is_empty() { None } else { Some(t) }
-                    };
-                    if let Some(name) = name {
-                        translations.insert((page_id, text_id), name);
+                    // Store the raw trimmed text for every page. Display-time
+                    // logic in map_domain::translations resolves {p,t} refs
+                    // and applies X4 display-name extraction.
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        translations.insert((page_id, text_id), trimmed.to_string());
                     }
                     current_text_id = None;
                 }
@@ -828,19 +822,6 @@ fn parse_page_text_ref(s: &str) -> Option<(u32, u32)> {
     let page_id: u32 = page.trim().parse().ok()?;
     let text_id: u32 = text.trim().parse().ok()?;
     Some((page_id, text_id))
-}
-
-/// Extract the last parenthetical content from a translation string.
-/// `"{20003,10001} {20402,1}(Grand Exchange I)"` → `"Grand Exchange I"`
-fn extract_last_parenthetical(s: &str) -> Option<String> {
-    let open = s.rfind('(')?;
-    let close = s[open..].find(')')?;
-    let name = s[open + 1..open + close].trim();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
-    }
 }
 
 /// zones.xml: return deduplicated (from_sector_macro, to_sector_macro) gate pairs.
@@ -1939,12 +1920,18 @@ mod tests {
   </page>
 </language>"#;
         let map = super::parse_translations_xml(xml).unwrap();
-        // 20003 + 20004 keep parenthetical extraction (existing behaviour).
-        assert_eq!(map.get(&(20003, 1)).map(String::as_str), Some("Argon Prime Cluster"));
-        assert_eq!(map.get(&(20004, 10011)).map(String::as_str), Some("Argon Prime"));
-        // 20101 (ship class names) — plain text retained.
+        // All pages now store PLAIN TEXT (composite refs preserved for runtime
+        // resolution). The display layer applies extract_x4_display_name and
+        // ref substitution as needed.
+        assert_eq!(
+            map.get(&(20003, 1)).map(String::as_str),
+            Some("{20003,2} {20004,1}(Argon Prime Cluster)")
+        );
+        assert_eq!(
+            map.get(&(20004, 10011)).map(String::as_str),
+            Some("{20004,10012} {20004,10013}(Argon Prime)")
+        );
         assert_eq!(map.get(&(20101, 122701)).map(String::as_str), Some("Cerberus Vanguard"));
-        // Unrelated page also kept.
         assert_eq!(map.get(&(10000, 500)).map(String::as_str), Some("Some Lore Snippet"));
     }
 }
