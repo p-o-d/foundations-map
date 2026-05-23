@@ -197,6 +197,69 @@ fn steam_language_to_locale_id(lang: &str) -> u32 {
     }
 }
 
+/// Enumerate locale IDs the installed game ships, by scanning the cat archive
+/// for `t/0001-lNNN.xml` filenames. Returns IDs sorted ascending, deduped.
+/// Empty Vec if the game dir has no locale files or cannot be read.
+pub fn list_available_locales(game_dir: &Path) -> Vec<u32> {
+    let files = crate::cat_reader::list_files_matching(game_dir, "t/0001-l", ".xml");
+    let mut ids: Vec<u32> = Vec::new();
+    for (path, _data) in files {
+        // Path looks like "t/0001-l044.xml" — extract the digits after `-l`.
+        if let Some(after_l) = path.rsplit_once("-l").map(|(_, b)| b) {
+            if let Some(num) = after_l.strip_suffix(".xml") {
+                if let Ok(id) = num.parse::<u32>() {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+    }
+    ids.sort_unstable();
+    ids
+}
+
+/// Human-friendly native name for a locale ID, used in the language dropdown.
+/// Unknown IDs render as `l<NNN>` so the user can at least identify the file.
+pub fn locale_display_name(id: u32) -> &'static str {
+    match id {
+        7   => "Русский",
+        33  => "Français",
+        34  => "Español",
+        39  => "Italiano",
+        42  => "Čeština",
+        44  => "English",
+        48  => "Polski",
+        49  => "Deutsch",
+        55  => "Português (Brasil)",
+        81  => "日本語",
+        82  => "한국어",
+        86  => "中文(简体)",
+        88  => "中文(繁體)",
+        90  => "Türkçe",
+        359 => "Български",
+        380 => "Українська",
+        _   => locale_unknown_label(id),
+    }
+}
+
+fn locale_unknown_label(id: u32) -> &'static str {
+    // Keep a tiny static cache for unknown ids encountered at runtime so we can
+    // hand out &'static str. Worst-case grows by the number of DLC-shipped
+    // locales we don't recognise (currently zero).
+    use std::sync::OnceLock;
+    use std::sync::Mutex;
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<u32, &'static str>>> = OnceLock::new();
+    let map = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let mut guard = map.lock().unwrap();
+    if let Some(s) = guard.get(&id) {
+        return *s;
+    }
+    let leaked: &'static str = Box::leak(format!("l{id}").into_boxed_str());
+    guard.insert(id, leaked);
+    leaked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +287,19 @@ mod tests {
             assert!(p.is_absolute(), "Path must be absolute: {:?}", p);
             assert!(p.to_string_lossy().contains(GAME_DIR_NAME));
         }
+    }
+
+    #[test]
+    fn locale_display_name_known_ids() {
+        assert_eq!(locale_display_name(44), "English");
+        assert_eq!(locale_display_name(49), "Deutsch");
+        assert_eq!(locale_display_name(7),  "Русский");
+        assert_eq!(locale_display_name(86), "中文(简体)");
+        assert_eq!(locale_display_name(380), "Українська");
+    }
+
+    #[test]
+    fn locale_display_name_unknown_falls_back_to_id() {
+        assert_eq!(locale_display_name(999), "l999");
     }
 }
