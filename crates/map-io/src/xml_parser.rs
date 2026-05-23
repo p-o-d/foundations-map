@@ -730,10 +730,10 @@ fn parse_sector_name_refs_xml(xml: &str) -> Result<HashMap<String, (u32, u32)>, 
 
 /// Translation file: (page_id, text_id) → display name string.
 ///
-/// Reads entries in pages 20003 (cluster names), 20004 (sector names), and
-/// 20201 (ware names). Sector/cluster entries have the form
-/// `{ref1} {ref2}(Display Name)` — the last parenthetical is taken. Ware
-/// entries are plain text (`Energy Cells`) and are kept as-is.
+/// Retains every page. Pages 20003 (cluster names) and 20004 (sector names)
+/// use the `{ref1} {ref2}(Display Name)` convention — only the parenthetical
+/// is stored. Every other page (ware names, ship class names, lore text, …)
+/// is kept as plain trimmed text.
 fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, ParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -752,10 +752,7 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     current_page = attr_value(e, b"id").and_then(|s| s.parse().ok());
                 }
                 b"t" => {
-                    // 20003 = cluster names, 20004 = sector names, 20201 = ware names
-                    if matches!(current_page, Some(20003 | 20004 | 20201)) {
-                        current_text_id = attr_value(e, b"id").and_then(|s| s.parse().ok());
-                    }
+                    current_text_id = attr_value(e, b"id").and_then(|s| s.parse().ok());
                 }
                 _ => {}
             },
@@ -765,13 +762,15 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     let decoded = e.decode().unwrap_or_default();
                     let content =
                         quick_xml::escape::unescape(&decoded).unwrap_or_else(|_| decoded.clone());
-                    // 20003/20004: parenthetical extraction (sector/cluster names).
-                    // 20201: plain text (ware names have no parenthetical).
-                    let name = if page_id == 20201 {
+                    // 20003 + 20004 (cluster / sector names) follow the
+                    // "{ref} {ref}(Display Name)" convention — take only the
+                    // parenthetical. Everything else (ware names, ship class
+                    // names, lore text, …) is plain text.
+                    let name = if matches!(page_id, 20003 | 20004) {
+                        extract_last_parenthetical(&content)
+                    } else {
                         let t = content.trim().to_string();
                         if t.is_empty() { None } else { Some(t) }
-                    } else {
-                        extract_last_parenthetical(&content)
                     };
                     if let Some(name) = name {
                         translations.insert((page_id, text_id), name);
@@ -1891,5 +1890,32 @@ mod tests {
         );
         // <missingid> has no `id` attribute — skipped.
         assert!(names.get("missingid").is_none());
+    }
+
+    #[test]
+    fn parse_translations_xml_retains_all_pages_with_correct_branch() {
+        let xml = r#"<?xml version="1.0"?>
+<language id="44">
+  <page id="20003">
+    <t id="1">{20003,2} {20004,1}(Argon Prime Cluster)</t>
+  </page>
+  <page id="20004">
+    <t id="10011">{20004,10012} {20004,10013}(Argon Prime)</t>
+  </page>
+  <page id="20101">
+    <t id="122701">Cerberus Vanguard</t>
+  </page>
+  <page id="10000">
+    <t id="500">Some Lore Snippet</t>
+  </page>
+</language>"#;
+        let map = super::parse_translations_xml(xml).unwrap();
+        // 20003 + 20004 keep parenthetical extraction (existing behaviour).
+        assert_eq!(map.get(&(20003, 1)).map(String::as_str), Some("Argon Prime Cluster"));
+        assert_eq!(map.get(&(20004, 10011)).map(String::as_str), Some("Argon Prime"));
+        // 20101 (ship class names) — plain text retained.
+        assert_eq!(map.get(&(20101, 122701)).map(String::as_str), Some("Cerberus Vanguard"));
+        // Unrelated page also kept.
+        assert_eq!(map.get(&(10000, 500)).map(String::as_str), Some("Some Lore Snippet"));
     }
 }
