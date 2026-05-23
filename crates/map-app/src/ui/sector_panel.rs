@@ -126,7 +126,7 @@ impl SectorPanel {
                                     .show(ui, |ui| {
                                         for &eid in eids {
                                             let is_sel = *selected_entity == Some(eid);
-                                            let (label, icon) = entity_row_label(world, eid);
+                                            let (label, icon) = entity_row_label(world, universe, eid);
                                             let color = if is_sel {
                                                 theme::ACCENT
                                             } else {
@@ -162,14 +162,14 @@ impl SectorPanel {
                         ui.colored_label(theme::TEXT_MUTED, "SELECTED");
                         if let Some(parent) = world.and_then(|w| w.parent_of(eid)) {
                             let parent_label = world
-                                .map(|w| entity_row_label(w, parent).0)
+                                .map(|w| entity_row_label(w, universe, parent).0)
                                 .unwrap_or_default();
                             if ui.button(format!("← Back to {}", parent_label)).clicked() {
                                 back_to_parent_clicked = true;
                             }
                         }
                         if let Some(world) = world {
-                            let (label, icon) = entity_row_label(world, eid);
+                            let (label, icon) = entity_row_label(world, universe, eid);
                             ui.colored_label(theme::ACCENT, format!("{} {}", icon, label));
                             if let Some(kind) = world.kinds.get(&eid) {
                                 ui.colored_label(theme::TEXT_MUTED, format!("Type: {:?}", kind));
@@ -205,7 +205,7 @@ impl SectorPanel {
                                     .default_open(true)
                                     .show(ui, |ui| {
                                         for &cid in kids {
-                                            let (clabel, cicon) = entity_row_label(world, cid);
+                                            let (clabel, cicon) = entity_row_label(world, universe, cid);
                                             if ui
                                                 .colored_label(
                                                     theme::TEXT_PRIMARY,
@@ -298,6 +298,7 @@ impl SectorPanel {
 
 fn entity_row_label(
     world: &map_domain::world::World,
+    universe: &map_domain::universe::Universe,
     eid: map_domain::world::EntityId,
 ) -> (String, &'static str) {
     use map_domain::world::LiveObjectKind;
@@ -307,16 +308,7 @@ fn entity_row_label(
         Some(LiveObjectKind::ShipMedium) => "▶",
         _ => "▴",
     };
-    let code = world.codes.get(&eid).cloned();
-    let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
-    let human = crate::colors::strip_macro(&macro_name);
-
-    let label = match (code, &human) {
-        (Some(c), h) if !h.is_empty() && h != &c => format!("{} — {}", c, h),
-        (Some(c), _) => c,
-        (None, h) if !h.is_empty() => h.clone(),
-        _ => macro_name,
-    };
+    let label = crate::colors::resolve_entity_label(world, universe, eid);
     (label, icon)
 }
 
