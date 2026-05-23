@@ -51,6 +51,7 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                             position: p.position.unwrap_or(Vec3::ZERO),
                             sector_macro: sector_macro.to_string(),
                             trade_offers: std::mem::take(&mut p.trade_offers),
+                            display_name_ref: p.display_name_ref.take(),
                         });
                     }
                 }
@@ -111,6 +112,7 @@ struct Pending {
     owner: Option<String>,
     position: Option<Vec3>,
     trade_offers: Vec<TradeOffer>,
+    display_name_ref: Option<String>,
 }
 
 fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Option<Pending> {
@@ -139,6 +141,7 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         owner,
         position: None,
         trade_offers: Vec::new(),
+        display_name_ref: None,
     })
 }
 

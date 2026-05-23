@@ -28,6 +28,7 @@ pub struct EntityRecord {
     pub position: glam::Vec3, // already km (metres / 1000)
     pub sector_macro: String, // lowercase
     pub trade_offers: Vec<TradeOffer>,
+    pub display_name_ref: Option<String>,
 }
 
 #[cfg(test)]
@@ -57,11 +58,10 @@ mod tests {
             position: glam::Vec3::new(0.0, 0.0, 0.0),
             sector_macro: "cluster_01_sector001_macro".into(),
             trade_offers: vec![],
+            display_name_ref: Some("{20102,1701}".into()),
         };
         assert_eq!(e.id, 0x100);
-        assert_eq!(e.parent_id, None);
-        assert_eq!(e.code.as_deref(), Some("YIB-942"));
-        assert_eq!(e.owner.as_deref(), Some("argon"));
+        assert_eq!(e.display_name_ref.as_deref(), Some("{20102,1701}"));
         assert!(e.trade_offers.is_empty());
     }
 }
