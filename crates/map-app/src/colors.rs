@@ -118,6 +118,38 @@ pub fn extract_x4_display_name(s: &str) -> String {
     trimmed.to_string()
 }
 
+/// Resolve the class-name portion of an entity label via lookups only.
+///
+/// Tries:
+///   1. The entity's per-instance `display_name_ref` from the save (may be a
+///      literal, a `{p,t}` ref, or a compound form).
+///   2. The macro definition file's `<identification name=...>` ref, looked up
+///      by the lowercased macro name in `universe.macro_identifications`.
+///
+/// Returns `None` when neither lookup yields a usable display name.
+fn resolve_class_name(
+    world: &map_domain::world::World,
+    universe: &map_domain::universe::Universe,
+    eid: map_domain::world::EntityId,
+    macro_name: &str,
+) -> Option<String> {
+    if let Some(raw) = world.display_name_refs.get(&eid) {
+        let resolved = replace_translation_refs(raw, &universe.translations);
+        let display = extract_x4_display_name(&resolved);
+        if !display.is_empty() && !display.starts_with('{') {
+            return Some(display);
+        }
+    }
+    if let Some(macro_ref) = universe.macro_identifications.get(&macro_name.to_lowercase()) {
+        let resolved = replace_translation_refs(macro_ref, &universe.translations);
+        let display = extract_x4_display_name(&resolved);
+        if !display.is_empty() && !display.starts_with('{') {
+            return Some(display);
+        }
+    }
+    None
+}
+
 /// Resolve a human label for one live entity, used by the side panel and
 /// the 3D hover tooltip.
 ///
@@ -135,15 +167,10 @@ pub fn resolve_entity_label(
         return String::new();
     }
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
-    let class_name: Option<String> = world.display_name_refs.get(&eid).map(|raw| {
-        replace_translation_refs(raw, &universe.translations)
+    let class_name = resolve_class_name(world, universe, eid, &macro_name).or_else(|| {
+        let stripped = strip_macro(&macro_name);
+        if stripped.is_empty() { None } else { Some(stripped) }
     });
-    let class_name: Option<String> = class_name
-        .filter(|s| !s.is_empty() && !s.starts_with('{'))
-        .or_else(|| {
-            let stripped = strip_macro(&macro_name);
-            if stripped.is_empty() { None } else { Some(stripped) }
-        });
     let code = world.codes.get(&eid).cloned();
     match (class_name, code) {
         (Some(c), Some(code)) => format!("{c} ({code})"),
@@ -164,15 +191,10 @@ pub fn resolve_entity_label_without_code(
         return String::new();
     }
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
-    world
-        .display_name_refs
-        .get(&eid)
-        .map(|raw| replace_translation_refs(raw, &universe.translations))
-        .filter(|s| !s.is_empty() && !s.starts_with('{'))
-        .unwrap_or_else(|| {
-            let stripped = strip_macro(&macro_name);
-            if stripped.is_empty() { macro_name } else { stripped }
-        })
+    resolve_class_name(world, universe, eid, &macro_name).unwrap_or_else(|| {
+        let stripped = strip_macro(&macro_name);
+        if stripped.is_empty() { macro_name } else { stripped }
+    })
 }
 
 #[cfg(test)]
@@ -239,7 +261,17 @@ mod tests {
     fn sample_universe() -> Universe {
         let mut u = Universe::default();
         u.translations = sample_translations();
+        // Add additional translations for the macro-identification test cases.
+        u.translations.insert((20101, 30801), "Helios".into());
+        u.translations.insert((20111, 5462), "E".into());
+        u.translations
+            .insert((20101, 30804), "(Helios E){20101,30801} {20111,5462}".into());
         u.current_locale = 44;
+        // Map "ship_par_l_trans_container_03_a_macro" to its identification ref.
+        u.macro_identifications.insert(
+            "ship_par_l_trans_container_03_a_macro".into(),
+            "{20101,30804}".into(),
+        );
         u
     }
 
@@ -274,6 +306,13 @@ mod tests {
             SectorId(1), None, None,
         );
         w.display_name_refs.insert(4, "{20101,122701}".into());
+
+        // Entity 5: no display_name_ref, but macro is in macro_identifications.
+        w.insert_entity(
+            5, "ship_par_l_trans_container_03_a_macro".into(),
+            LiveObjectKind::ShipLarge, None, glam::Vec3::ZERO,
+            SectorId(1), None, Some("AKV-484".into()),
+        );
 
         w
     }
@@ -320,6 +359,47 @@ mod tests {
         assert_eq!(resolve_entity_label_without_code(&w, &u, 1), "Cerberus Vanguard");
         assert_eq!(resolve_entity_label_without_code(&w, &u, 2), "My Best Ship");
         assert_eq!(resolve_entity_label_without_code(&w, &u, 3), "ship xen n fighter 01 a");
+    }
+
+    #[test]
+    fn resolve_entity_label_uses_macro_identification_when_no_display_name_ref() {
+        let u = sample_universe();
+        let w = sample_world();
+        // Entity 5: no display_name_ref. Macro lookup yields {20101,30804}
+        // → "(Helios E){20101,30801} {20111,5462}" → recurse → "(Helios E)Helios E"
+        // → extract → "Helios E". With code → "Helios E (AKV-484)".
+        assert_eq!(resolve_entity_label(&w, &u, 5), "Helios E (AKV-484)");
+    }
+
+    #[test]
+    fn resolve_entity_label_save_attr_takes_precedence_over_macro_identification() {
+        let mut u = sample_universe();
+        // Make entity 1's macro also match a macro_identifications entry.
+        u.macro_identifications.insert(
+            "ship_par_l_trans_container_03_a_macro".into(),
+            "{20101,30804}".into(),
+        );
+        let w = sample_world();
+        // Entity 1 has display_name_ref="{20101,122701}" → "Cerberus Vanguard"
+        // → extract → "Cerberus Vanguard (AKV-484)".
+        // It does NOT fall through to macro_identifications because the save
+        // attribute resolved successfully.
+        assert_eq!(resolve_entity_label(&w, &u, 1), "Cerberus Vanguard (AKV-484)");
+    }
+
+    #[test]
+    fn resolve_entity_label_compound_save_attr_extracts_correctly() {
+        // Compound form "(Name)Description" via display_name_ref.
+        let u = sample_universe();
+        let mut w = sample_world();
+        // Add entity 6 whose save name= is itself a compound ref.
+        w.insert_entity(
+            6, "ship_test".into(),
+            LiveObjectKind::ShipLarge, None, glam::Vec3::ZERO,
+            SectorId(1), None, Some("XYZ-1".into()),
+        );
+        w.display_name_refs.insert(6, "{20101,30804}".into());
+        assert_eq!(resolve_entity_label(&w, &u, 6), "Helios E (XYZ-1)");
     }
 
     fn translations_for_recursion() -> std::collections::HashMap<(u32, u32), String> {
