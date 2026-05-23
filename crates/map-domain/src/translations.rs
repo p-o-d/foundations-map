@@ -81,18 +81,70 @@ fn replace_translation_refs_once(
 ///   - `NAME(desc)`  → `NAME`  (trailing parenthetical is a description)
 ///   - plain text    → as-is
 ///
+/// X4 entries may use `\(` and `\)` to escape literal parentheses inside a
+/// name. These are treated as regular chars when finding the structural parens,
+/// and are unescaped in the returned string.
+///
 /// Whitespace around the result is trimmed.
 pub fn extract_x4_display_name(s: &str) -> String {
     let trimmed = s.trim();
-    if let Some(stripped) = trimmed.strip_prefix('(') {
-        if let Some(close) = stripped.find(')') {
-            return stripped[..close].trim().to_string();
+
+    // Helper: find the first UNESCAPED occurrence of `target` in `text`.
+    // A char preceded by `\` is treated as escaped and skipped.
+    let find_unescaped = |text: &str, target: char| -> Option<usize> {
+        let bytes = text.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            if b as char != target {
+                continue;
+            }
+            // Walk backwards counting consecutive backslashes; if even (incl. 0)
+            // the char is unescaped.
+            let mut backslashes = 0;
+            let mut j = i;
+            while j > 0 && bytes[j - 1] == b'\\' {
+                backslashes += 1;
+                j -= 1;
+            }
+            if backslashes % 2 == 0 {
+                return Some(i);
+            }
+        }
+        None
+    };
+
+    // Helper: unescape `\(` → `(` and `\)` → `)`. Other backslash sequences
+    // are left intact.
+    let unescape = |text: &str| -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.peek() {
+                    Some(&'(') | Some(&')') => {
+                        out.push(chars.next().unwrap());
+                    }
+                    _ => out.push('\\'),
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+
+    // Leading unescaped `(NAME)`: take NAME (and unescape its contents).
+    if trimmed.starts_with('(') {
+        let inner = &trimmed[1..];
+        if let Some(close) = find_unescaped(inner, ')') {
+            return unescape(inner[..close].trim());
         }
     }
-    if let Some(open) = trimmed.find('(') {
-        return trimmed[..open].trim().to_string();
+    // Trailing description: text before first UNESCAPED `(`.
+    if let Some(open) = find_unescaped(trimmed, '(') {
+        return unescape(trimmed[..open].trim());
     }
-    trimmed.to_string()
+    // No paren — return as-is (with any paren escapes unescaped).
+    unescape(trimmed)
 }
 
 #[cfg(test)]
@@ -201,5 +253,44 @@ mod tests {
     #[test]
     fn extract_x4_display_name_handles_paren_only() {
         assert_eq!(extract_x4_display_name("(Helios E)"), "Helios E");
+    }
+
+    #[test]
+    fn extract_x4_display_name_unescapes_paren_escapes_in_leading_name() {
+        // Real X4 entry: parens inside the leading display name are
+        // escaped with backslashes. The unescaped name is the display.
+        assert_eq!(
+            extract_x4_display_name("(Drill \\(Mineral\\) Vanguard){20101,10801}"),
+            "Drill (Mineral) Vanguard"
+        );
+    }
+
+    #[test]
+    fn extract_x4_display_name_unescapes_paren_escapes_in_trailing_position() {
+        // Plain leading text with escapes before a real trailing description.
+        // The first UNESCAPED `(` opens the description; the prefix is the name.
+        assert_eq!(
+            extract_x4_display_name("Drill \\(Mineral\\) Mk1(description here)"),
+            "Drill (Mineral) Mk1"
+        );
+    }
+
+    #[test]
+    fn extract_x4_display_name_pure_plain_with_escapes_unescapes() {
+        assert_eq!(
+            extract_x4_display_name("Foo \\(Bar\\) Baz"),
+            "Foo (Bar) Baz"
+        );
+    }
+
+    #[test]
+    fn extract_x4_display_name_backslash_n_not_treated_specially() {
+        // Only `\(` and `\)` are X4 paren escapes. `\n` and other escapes
+        // remain literal (we display them as-is — newlines are rare in
+        // display names and would still render reasonably).
+        assert_eq!(
+            extract_x4_display_name("Foo \\n Bar"),
+            "Foo \\n Bar"
+        );
     }
 }
