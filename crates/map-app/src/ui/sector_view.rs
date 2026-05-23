@@ -211,23 +211,16 @@ fn draw_icons_2d(
     };
 
     let emit = |screen: Pos2, icon: IconId, faction_color: egui::Color32, selected: bool| {
-        let (half, stroke, dot_r) = if selected {
-            (icons::HALF_SELECTED, icons::STROKE_SELECTED, icons::DOT_RADIUS_SEL)
+        let (half, stroke) = if selected {
+            (icons::HALF_SELECTED, icons::STROKE_SELECTED)
         } else {
-            (icons::HALF_NORMAL, icons::STROKE_NORMAL, icons::DOT_RADIUS)
+            (icons::HALF_NORMAL, icons::STROKE_NORMAL)
         };
-        // PlayerStation always has a white frame; selection overrides to yellow.
-        let frame_color = if selected {
-            icons::SELECTION_COLOR
-        } else if icon == IconId::PlayerStation {
-            egui::Color32::WHITE
-        } else {
-            faction_color
-        };
+        let frame_color = if selected { icons::SELECTION_COLOR } else { faction_color };
         match icon.super_category() {
             SuperCategory::Station => icons::draw_station_frame(painter, screen, half, stroke, frame_color),
-            SuperCategory::Ship    => icons::draw_ship_frame(painter, screen, half, stroke, frame_color),
-            SuperCategory::Static  => icons::draw_static_frame(painter, screen, half, dot_r),
+            SuperCategory::Ship    => {} // ships render glyph only, no frame
+            SuperCategory::Static  => icons::draw_static_frame(painter, screen, half, stroke),
         }
         icons::draw_glyph(painter, icon, screen, half, frame_color);
     };
