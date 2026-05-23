@@ -1850,6 +1850,8 @@ dependencies = [
  "glam",
  "map-domain",
  "map-io",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
