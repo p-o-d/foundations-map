@@ -129,7 +129,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         // Restrict to ship + station macro files. Filter by asset PATH rather
         // than macro-name prefix so entries like landmarks_* (class="station"
         // but no `station_` prefix) are still picked up.
-        if !(path.starts_with("assets/units/") || path.starts_with("assets/structures/")) {
+        if !(path.starts_with("assets/units/")
+            || path.starts_with("assets/structures/")
+            || path.starts_with("assets/environments/"))
+        {
             continue;
         }
         let Some(macro_xml) = crate::cat_reader::read_game_file(game_dir, path) else {
