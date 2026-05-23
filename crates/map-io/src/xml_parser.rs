@@ -1445,16 +1445,15 @@ fn macro_to_display_name(s: &str) -> String {
     s.trim_end_matches("_macro").replace('_', " ")
 }
 
-/// Resolve a translation lookup into a clean display name. Applies
-/// `replace_translation_refs` recursively (so composite cluster/sector entries
-/// like `{20005,6002}(Grand Exchange)` substitute the real translated name)
-/// then `extract_x4_display_name` to strip translator hints / descriptions.
+/// Resolve a translation lookup into a clean display name.
+/// Delegates to `x4_display_name` which handles ref substitution (recursive),
+/// leading-paren display extraction, trailing-paren hint stripping, and
+/// backslash-paren unescaping in one unified pass.
 fn resolve_display_name(
     raw: &str,
     translations: &HashMap<(u32, u32), String>,
 ) -> String {
-    let resolved = map_domain::translations::replace_translation_refs(raw, translations);
-    map_domain::translations::extract_x4_display_name(&resolved)
+    map_domain::translations::x4_display_name(raw, translations)
 }
 
 /// Parse a combined single-file galaxy XML (fixture format used in tests).
@@ -1935,8 +1934,8 @@ mod tests {
 </language>"#;
         let map = super::parse_translations_xml(xml).unwrap();
         // All pages now store PLAIN TEXT (composite refs preserved for runtime
-        // resolution). The display layer applies extract_x4_display_name and
-        // ref substitution as needed.
+        // resolution). The display layer applies x4_display_name which handles
+        // ref substitution and trailing/leading paren extraction in one pass.
         assert_eq!(
             map.get(&(20003, 1)).map(String::as_str),
             Some("{20003,2} {20004,1}(Argon Prime Cluster)")

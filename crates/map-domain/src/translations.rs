@@ -1,40 +1,53 @@
-//! Shared helpers for resolving X4 translation refs into human display names.
+//! Shared helper for resolving X4 translation refs into human display names.
 //!
-//! `replace_translation_refs` substitutes every `{page,id}` substring with its
-//! resolved translation (recursing up to 4 levels so chained X4 entries fully
-//! resolve). `extract_x4_display_name` applies X4's display conventions to a
-//! resolved string: leading parenthetical = display name, trailing
-//! parenthetical = description, plain text = as-is.
+//! `x4_display_name` applies X4's display conventions uniformly:
+//!   - Text starting with `(NAME)`: NAME is the display (translator-asserted
+//!     composite name); the rest is X4 internal composition.
+//!   - Text starting with `{p,t}` or plain text: substitute each `{p,t}`
+//!     recursively via the same function (so sub-refs strip their own
+//!     trailing translator parens), then strip any trailing unescaped
+//!     `(description)` from the result.
+//!   - `\(` and `\)` escape sequences are unescaped in the final output.
 
 use std::collections::HashMap;
 
-/// Substitute every `{page,id}` substring with its resolved translation, leaving
-/// other text intact. Used for compound names like `{p,t} ({p,t})` and for
-/// literal user-renamed ships (which contain no braces and pass through unchanged).
-/// Unknown translation keys and malformed brace groups are left as-is, which
-/// helps spot missing IDs while debugging.
-///
-/// Substituted strings may themselves contain `{p,t}` refs (X4 chains class
-/// names through other entries). Resolution iterates up to 4 times to handle
-/// these compound forms while terminating safely on self-referential loops.
-pub fn replace_translation_refs(
-    s: &str,
-    translations: &HashMap<(u32, u32), String>,
-) -> String {
-    let mut current = s.to_string();
-    for _ in 0..4 {
-        let next = replace_translation_refs_once(&current, translations);
-        if next == current {
-            return current;
-        }
-        current = next;
-    }
-    current
+const MAX_RECURSION_DEPTH: u32 = 6;
+
+/// Resolve an X4 translation entry into a clean human display name.
+/// `translations` maps `(page_id, text_id)` → raw entry text.
+pub fn x4_display_name(text: &str, translations: &HashMap<(u32, u32), String>) -> String {
+    x4_display_name_inner(text, translations, 0)
 }
 
-fn replace_translation_refs_once(
+fn x4_display_name_inner(
+    text: &str,
+    translations: &HashMap<(u32, u32), String>,
+    depth: u32,
+) -> String {
+    let trimmed = text.trim();
+
+    if let Some(rest) = trimmed.strip_prefix('(') {
+        if let Some(close) = find_unescaped(rest, ')') {
+            return unescape_parens(rest[..close].trim());
+        }
+    }
+
+    let substituted = if depth >= MAX_RECURSION_DEPTH {
+        trimmed.to_string()
+    } else {
+        substitute_refs(trimmed, translations, depth)
+    };
+
+    let stripped = strip_trailing_paren(substituted.trim());
+    unescape_parens(stripped.trim())
+}
+
+/// Substitute each `{page,id}` substring with the recursive display of the
+/// referenced entry. Unknown refs and malformed brace groups stay verbatim.
+fn substitute_refs(
     s: &str,
     translations: &HashMap<(u32, u32), String>,
+    depth: u32,
 ) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -58,7 +71,10 @@ fn replace_translation_refs_once(
                             .split_once(',')
                             .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
                         match parsed.and_then(|(p, t)| translations.get(&(p, t))) {
-                            Some(text) => out.push_str(text),
+                            Some(referenced) => {
+                                let resolved = x4_display_name_inner(referenced, translations, depth + 1);
+                                out.push_str(&resolved);
+                            }
                             None => {
                                 out.push('{');
                                 out.push_str(inner);
@@ -74,223 +90,237 @@ fn replace_translation_refs_once(
     out
 }
 
-/// Extract the human display name from an X4 translation entry following its
-/// pluralistic conventions:
-///   - `(NAME)rest`  → `NAME`  (leading parenthetical is the display name;
-///                              the trailing text is X4 internal composition)
-///   - `NAME(desc)`  → `NAME`  (trailing parenthetical is a description)
-///   - plain text    → as-is
-///
-/// X4 entries may use `\(` and `\)` to escape literal parentheses inside a
-/// name. These are treated as regular chars when finding the structural parens,
-/// and are unescaped in the returned string.
-///
-/// Whitespace around the result is trimmed.
-pub fn extract_x4_display_name(s: &str) -> String {
-    let trimmed = s.trim();
+/// Find the first UNESCAPED occurrence of `target` byte in `text`. A `target`
+/// char preceded by an odd number of backslashes is considered escaped.
+fn find_unescaped(text: &str, target: char) -> Option<usize> {
+    let bytes = text.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b as char != target {
+            continue;
+        }
+        let mut backslashes = 0;
+        let mut j = i;
+        while j > 0 && bytes[j - 1] == b'\\' {
+            backslashes += 1;
+            j -= 1;
+        }
+        if backslashes % 2 == 0 {
+            return Some(i);
+        }
+    }
+    None
+}
 
-    // Helper: find the first UNESCAPED occurrence of `target` in `text`.
-    // A char preceded by `\` is treated as escaped and skipped.
-    let find_unescaped = |text: &str, target: char| -> Option<usize> {
-        let bytes = text.as_bytes();
-        for (i, &b) in bytes.iter().enumerate() {
-            if b as char != target {
-                continue;
-            }
-            // Walk backwards counting consecutive backslashes; if even (incl. 0)
-            // the char is unescaped.
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                return Some(i);
+/// Strip a single trailing unescaped `(...)` from `s` if present.
+/// Returns the substring before the opening unescaped `(` of the last
+/// top-level paren group. If no trailing paren exists, returns `s` unchanged.
+fn strip_trailing_paren(s: &str) -> String {
+    let s = s.trim_end();
+    if !s.ends_with(')') {
+        return s.to_string();
+    }
+    // Find the matching unescaped `(`. We walk from the end and balance.
+    let bytes = s.as_bytes();
+    let mut depth: i32 = 0;
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        let c = bytes[i] as char;
+        if c != '(' && c != ')' {
+            continue;
+        }
+        // Check if escaped (odd backslashes before it).
+        let mut backslashes = 0;
+        let mut j = i;
+        while j > 0 && bytes[j - 1] == b'\\' {
+            backslashes += 1;
+            j -= 1;
+        }
+        if backslashes % 2 == 1 {
+            continue;
+        }
+        if c == ')' {
+            depth += 1;
+        } else {
+            depth -= 1;
+            if depth == 0 {
+                // i is the opening `(`. Return everything before it.
+                return s[..i].trim_end().to_string();
             }
         }
-        None
-    };
+    }
+    // Unbalanced; leave as-is.
+    s.to_string()
+}
 
-    // Helper: unescape `\(` → `(` and `\)` → `)`. Other backslash sequences
-    // are left intact.
-    let unescape = |text: &str| -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\\' {
-                match chars.peek() {
-                    Some(&'(') | Some(&')') => {
-                        out.push(chars.next().unwrap());
-                    }
-                    _ => out.push('\\'),
+/// Unescape `\(` → `(` and `\)` → `)`. Other backslash sequences pass through
+/// verbatim (the backslash is preserved).
+fn unescape_parens(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some(&'(') | Some(&')') => {
+                    out.push(chars.next().unwrap());
                 }
-            } else {
-                out.push(c);
+                _ => out.push('\\'),
             }
-        }
-        out
-    };
-
-    // Leading unescaped `(NAME)`: take NAME (and unescape its contents).
-    if trimmed.starts_with('(') {
-        let inner = &trimmed[1..];
-        if let Some(close) = find_unescaped(inner, ')') {
-            return unescape(inner[..close].trim());
+        } else {
+            out.push(c);
         }
     }
-    // Trailing description: text before first UNESCAPED `(`.
-    if let Some(open) = find_unescaped(trimmed, '(') {
-        return unescape(trimmed[..open].trim());
-    }
-    // No paren — return as-is (with any paren escapes unescaped).
-    unescape(trimmed)
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn sample_translations() -> HashMap<(u32, u32), String> {
+    fn ship_translations() -> HashMap<(u32, u32), String> {
         let mut m = HashMap::new();
-        m.insert((20101, 122701), "Cerberus Vanguard".into());
-        m.insert((20203, 401), "Argon Federation".into());
-        m
-    }
-
-    fn translations_for_recursion() -> HashMap<(u32, u32), String> {
-        let mut m = HashMap::new();
-        m.insert((20101, 30804), "(Helios E){20101,30801} {20111,5462}".into());
+        // Plain class name.
+        m.insert((20101, 10101), "Discoverer".into());
+        // Ship with trailing description.
+        m.insert((20101, 122701), "Wayfinder(ALI Expedition ship)".into());
+        // Variant with leading paren.
         m.insert((20101, 30801), "Helios".into());
         m.insert((20111, 5462), "E".into());
-        m.insert((20101, 122701), "Wayfinder(ALI Expedition ship)".into());
-        m.insert((20101, 10101), "Discoverer".into());
+        m.insert((20101, 30804), "(Helios E){20101,30801} {20111,5462}".into());
+        // Variant with escaped parens.
+        m.insert((20101, 10801), "Drill".into());
+        m.insert((20111, 3101), "(Mineral)".into());
+        m.insert((20111, 1101), "Vanguard".into());
+        // We test the leading-paren form for this case explicitly below.
+        m
+    }
+
+    fn sector_translations() -> HashMap<(u32, u32), String> {
+        let mut m = HashMap::new();
+        // Cluster name source (page 20005).
+        m.insert((20005, 6002), "Большая биржа".into());
+        m.insert((20005, 6055), "Пустошь возможностей".into());
+        // Numeral page.
+        m.insert((20402, 1), "I(speak as 1)".into());
+        // Cluster page entry with composite ref + paren hint.
+        m.insert((20003, 10001), "{20005,6002}(Большая биржа)".into());
+        // Sector page entries with cluster ref + numeral ref + paren hint.
+        m.insert((20004, 10011), "{20003,10001} {20402,1}(Большая Биржа I)".into());
+        // Cluster page entry that ONLY uses ref substitution (paren is translator-only).
+        m.insert((20003, 7250001), "{20005,6055}(Void of Opportunity)".into());
         m
     }
 
     #[test]
-    fn replace_translation_refs_single_ref() {
-        let t = sample_translations();
+    fn plain_text_returned_as_is() {
+        let t = ship_translations();
+        assert_eq!(x4_display_name("Discoverer", &t), "Discoverer");
+    }
+
+    #[test]
+    fn empty_returns_empty() {
+        let t = HashMap::new();
+        assert_eq!(x4_display_name("", &t), "");
+    }
+
+    #[test]
+    fn leading_paren_returns_paren_contents() {
+        let t = ship_translations();
         assert_eq!(
-            replace_translation_refs("{20101,122701}", &t),
-            "Cerberus Vanguard"
+            x4_display_name("(Helios E){20101,30801} {20111,5462}", &t),
+            "Helios E"
         );
     }
 
     #[test]
-    fn replace_translation_refs_compound() {
-        let t = sample_translations();
+    fn leading_paren_with_escaped_inner_parens_unescaped() {
+        let t = ship_translations();
         assert_eq!(
-            replace_translation_refs("{20101,122701} ({20203,401})", &t),
-            "Cerberus Vanguard (Argon Federation)"
-        );
-    }
-
-    #[test]
-    fn replace_translation_refs_literal_passes_through() {
-        let t = sample_translations();
-        assert_eq!(
-            replace_translation_refs("My Best Ship", &t),
-            "My Best Ship"
-        );
-    }
-
-    #[test]
-    fn replace_translation_refs_unknown_key_left_intact() {
-        let t = sample_translations();
-        assert_eq!(
-            replace_translation_refs("{99999,1}", &t),
-            "{99999,1}"
-        );
-    }
-
-    #[test]
-    fn replace_translation_refs_malformed_left_intact() {
-        let t = sample_translations();
-        assert_eq!(replace_translation_refs("{not,a,ref}", &t), "{not,a,ref}");
-        assert_eq!(replace_translation_refs("{",          &t), "{");
-        assert_eq!(replace_translation_refs("plain text", &t), "plain text");
-    }
-
-    #[test]
-    fn replace_translation_refs_recurses_into_substituted_text() {
-        let t = translations_for_recursion();
-        assert_eq!(
-            replace_translation_refs("{20101,30804}", &t),
-            "(Helios E)Helios E"
-        );
-    }
-
-    #[test]
-    fn replace_translation_refs_terminates_on_self_referential_loop() {
-        let mut t = HashMap::new();
-        t.insert((1, 1), "{1,1}".into());
-        let result = replace_translation_refs("{1,1}", &t);
-        assert!(result.len() < 10_000);
-    }
-
-    #[test]
-    fn extract_x4_display_name_leading_paren_wins() {
-        assert_eq!(extract_x4_display_name("(Helios E)Helios E"), "Helios E");
-        assert_eq!(
-            extract_x4_display_name("(Discoverer Vanguard)Discoverer Vanguard"),
-            "Discoverer Vanguard"
-        );
-    }
-
-    #[test]
-    fn extract_x4_display_name_trailing_paren_treated_as_description() {
-        assert_eq!(extract_x4_display_name("Wayfinder(ALI Expedition ship)"), "Wayfinder");
-        assert_eq!(extract_x4_display_name("Cerberus (Vanguard)"), "Cerberus");
-    }
-
-    #[test]
-    fn extract_x4_display_name_plain_text_returned_as_is() {
-        assert_eq!(extract_x4_display_name("Discoverer"), "Discoverer");
-        assert_eq!(extract_x4_display_name(""), "");
-    }
-
-    #[test]
-    fn extract_x4_display_name_handles_paren_only() {
-        assert_eq!(extract_x4_display_name("(Helios E)"), "Helios E");
-    }
-
-    #[test]
-    fn extract_x4_display_name_unescapes_paren_escapes_in_leading_name() {
-        // Real X4 entry: parens inside the leading display name are
-        // escaped with backslashes. The unescaped name is the display.
-        assert_eq!(
-            extract_x4_display_name("(Drill \\(Mineral\\) Vanguard){20101,10801}"),
+            x4_display_name("(Drill \\(Mineral\\) Vanguard){20101,10801}", &t),
             "Drill (Mineral) Vanguard"
         );
     }
 
     #[test]
-    fn extract_x4_display_name_unescapes_paren_escapes_in_trailing_position() {
-        // Plain leading text with escapes before a real trailing description.
-        // The first UNESCAPED `(` opens the description; the prefix is the name.
+    fn trailing_paren_is_treated_as_description() {
+        let t = ship_translations();
         assert_eq!(
-            extract_x4_display_name("Drill \\(Mineral\\) Mk1(description here)"),
+            x4_display_name("Wayfinder(ALI Expedition ship)", &t),
+            "Wayfinder"
+        );
+    }
+
+    #[test]
+    fn trailing_paren_with_escaped_parens_in_name_unescaped() {
+        let t = HashMap::new();
+        assert_eq!(
+            x4_display_name("Drill \\(Mineral\\) Mk1(description)", &t),
             "Drill (Mineral) Mk1"
         );
     }
 
     #[test]
-    fn extract_x4_display_name_pure_plain_with_escapes_unescapes() {
+    fn ref_substitution_resolves_sub_refs_recursively() {
+        let t = ship_translations();
+        // {20101,30804} → "(Helios E){20101,...} {20111,...}" → leading paren → "Helios E"
+        assert_eq!(x4_display_name("{20101,30804}", &t), "Helios E");
+    }
+
+    #[test]
+    fn refs_substituted_then_trailing_paren_stripped() {
+        // The Void of Opportunity case: trailing paren is translator hint.
+        let t = sector_translations();
         assert_eq!(
-            extract_x4_display_name("Foo \\(Bar\\) Baz"),
-            "Foo (Bar) Baz"
+            x4_display_name("{20005,6055}(Void of Opportunity)", &t),
+            "Пустошь возможностей"
         );
     }
 
     #[test]
-    fn extract_x4_display_name_backslash_n_not_treated_specially() {
-        // Only `\(` and `\)` are X4 paren escapes. `\n` and other escapes
-        // remain literal (we display them as-is — newlines are rare in
-        // display names and would still render reasonably).
+    fn composite_sector_entry_resolves_via_recursive_substitution() {
+        // Each sub-ref is itself resolved through x4_display_name, so its
+        // trailing translator paren is stripped before interpolation.
+        let t = sector_translations();
         assert_eq!(
-            extract_x4_display_name("Foo \\n Bar"),
-            "Foo \\n Bar"
+            x4_display_name("{20003,10001} {20402,1}(Большая Биржа I)", &t),
+            "Большая биржа I"
         );
+    }
+
+    #[test]
+    fn cluster_entry_via_ref_extracts_correctly() {
+        let t = sector_translations();
+        // Lookup of cluster 10001 directly.
+        assert_eq!(
+            x4_display_name("{20003,10001}", &t),
+            "Большая биржа"
+        );
+    }
+
+    #[test]
+    fn unknown_ref_left_intact_inside_result() {
+        let mut t = HashMap::new();
+        t.insert((20101, 1), "Foo".into());
+        // {99999,1} stays verbatim; visible for debugging.
+        assert_eq!(
+            x4_display_name("{20101,1} {99999,1}", &t),
+            "Foo {99999,1}"
+        );
+    }
+
+    #[test]
+    fn self_referential_loop_terminates() {
+        let mut t = HashMap::new();
+        t.insert((1, 1), "{1,1}".into());
+        let result = x4_display_name("{1,1}", &t);
+        // Just need termination + bounded size.
+        assert!(result.len() < 10_000);
+    }
+
+    #[test]
+    fn malformed_brace_passes_through() {
+        let t = HashMap::new();
+        assert_eq!(x4_display_name("{not,a,ref}", &t), "{not,a,ref}");
+        assert_eq!(x4_display_name("{", &t), "{");
     }
 }

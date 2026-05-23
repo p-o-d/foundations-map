@@ -1,7 +1,7 @@
 //! Centralised faction colour + name resolution. Reads from `Universe.faction_table`.
 //! Also provides shared string-utility helpers used across UI modules.
 
-pub use map_domain::translations::{extract_x4_display_name, replace_translation_refs};
+pub use map_domain::translations::x4_display_name;
 
 use map_domain::ids::FactionId;
 use map_domain::universe::Universe;
@@ -48,15 +48,13 @@ fn resolve_class_name(
     macro_name: &str,
 ) -> Option<String> {
     if let Some(raw) = world.display_name_refs.get(&eid) {
-        let resolved = replace_translation_refs(raw, &universe.translations);
-        let display = extract_x4_display_name(&resolved);
+        let display = x4_display_name(raw, &universe.translations);
         if !display.is_empty() && !display.starts_with('{') {
             return Some(display);
         }
     }
     if let Some(macro_ref) = universe.macro_identifications.get(&macro_name.to_lowercase()) {
-        let resolved = replace_translation_refs(macro_ref, &universe.translations);
-        let display = extract_x4_display_name(&resolved);
+        let display = x4_display_name(macro_ref, &universe.translations);
         if !display.is_empty() && !display.starts_with('{') {
             return Some(display);
         }
@@ -235,8 +233,8 @@ mod tests {
         let u = sample_universe();
         let w = sample_world();
         // Entity 5: no display_name_ref. Macro lookup yields {20101,30804}
-        // → "(Helios E){20101,30801} {20111,5462}" → recurse → "(Helios E)Helios E"
-        // → extract → "Helios E". With code → "Helios E (AKV-484)".
+        // → x4_display_name("{20101,30804}") → resolves to "(Helios E){...} {…}"
+        // → leading paren → "Helios E". With code → "Helios E (AKV-484)".
         assert_eq!(resolve_entity_label(&w, &u, 5), "Helios E (AKV-484)");
     }
 
