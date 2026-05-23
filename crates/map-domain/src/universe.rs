@@ -60,6 +60,15 @@ pub struct Universe {
     /// Lowercase ware id (e.g. "energycells") → display name (e.g. "Energy Cells").
     /// Built once at galaxy load from `libraries/wares.xml`. Empty if parse failed.
     pub ware_names: std::collections::HashMap<String, String>,
+    /// Full translation table: (page_id, text_id) -> display string. Populated at
+    /// galaxy load from `t/0001-l<locale>.xml`. Consumed by the entity-label
+    /// resolver and the ware-name lookup.
+    pub translations: std::collections::HashMap<(u32, u32), String>,
+    /// Locale IDs the installed game ships (parsed from `t/0001-l*.xml` filenames).
+    /// Drives the top-bar language dropdown.
+    pub available_locales: Vec<u32>,
+    /// Locale ID this Universe was loaded with (e.g. 44 for English).
+    pub current_locale: u32,
 }
 
 impl Universe {
@@ -95,6 +104,9 @@ mod tests {
             faction_strings: HashMap::new(),
             faction_table: HashMap::new(),
             ware_names: HashMap::new(),
+            translations: HashMap::new(),
+            available_locales: Vec::new(),
+            current_locale: 0,
             sectors: vec![
                 Sector {
                     id: a,
@@ -176,5 +188,16 @@ mod tests {
             Some("Energy Cells")
         );
         assert!(u.ware_names.get("missing").is_none());
+    }
+
+    #[test]
+    fn universe_translations_and_locale_fields() {
+        let mut u = Universe::default();
+        u.translations.insert((20101, 122701), "Cerberus Vanguard".into());
+        u.available_locales = vec![44, 49, 33];
+        u.current_locale = 44;
+        assert_eq!(u.translations.get(&(20101, 122701)).map(String::as_str), Some("Cerberus Vanguard"));
+        assert_eq!(u.available_locales, vec![44, 49, 33]);
+        assert_eq!(u.current_locale, 44);
     }
 }
