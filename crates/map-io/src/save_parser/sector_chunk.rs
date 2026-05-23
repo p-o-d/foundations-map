@@ -130,6 +130,11 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
     let macro_name = attr_str(e, b"macro").unwrap_or_else(|| class.clone());
     let code = attr_str(e, b"code");
     let owner = attr_str(e, b"owner");
+    let name_attr = attr_str(e, b"name");
+    let basename_attr = attr_str(e, b"basename");
+    // Stations: prefer `name=` if present, else `basename=`.
+    // Ships:    use `name=`. (Ships do not carry `basename=`.)
+    let display_name_ref = name_attr.or(basename_attr);
 
     Some(Pending {
         open_depth: depth,
@@ -141,7 +146,7 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         owner,
         position: None,
         trade_offers: Vec::new(),
-        display_name_ref: None,
+        display_name_ref,
     })
 }
 
@@ -374,6 +379,49 @@ mod tests {
         let out = parse_sector_chunk(chunk, "m");
         let station = out.iter().find(|r| r.id == 0x100).unwrap();
         assert!(station.trade_offers.is_empty());
+    }
+
+    #[test]
+    fn parses_ship_name_station_basename_and_literal() {
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="ship_l" macro="ship_par_l_trans_container_03_a_macro"
+             name="{20101,122701}" code="AKV-484" owner="alliance" id="[0x10]">
+    <offset><position x="0" y="0" z="0"/></offset>
+  </component>
+  <component class="station" macro="station_gen_factory_base_01_macro"
+             basename="{20102,1701}" code="FAR-140" owner="freesplit" id="[0x20]">
+    <offset><position x="0" y="0" z="0"/></offset>
+  </component>
+  <component class="station" macro="station_gen_factory_base_01_macro"
+             name="{20103,2001}" basename="{20103,2001}"
+             code="NLK-443" owner="split" id="[0x21]">
+    <offset><position x="0" y="0" z="0"/></offset>
+  </component>
+  <component class="ship_s" macro="ship_arg_s_scout_01_a_macro"
+             name="My Best Ship" code="MBS-001" owner="player" id="[0x30]">
+    <offset><position x="0" y="0" z="0"/></offset>
+  </component>
+  <component class="ship_xs" macro="ship_gen_xs_escapepod_01_a_macro"
+             code="PXP-294" owner="paranid" id="[0x40]">
+    <offset><position x="0" y="0" z="0"/></offset>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let ship_l = out.iter().find(|r| r.id == 0x10).unwrap();
+        assert_eq!(ship_l.display_name_ref.as_deref(), Some("{20101,122701}"));
+
+        let station_basename = out.iter().find(|r| r.id == 0x20).unwrap();
+        assert_eq!(station_basename.display_name_ref.as_deref(), Some("{20102,1701}"));
+
+        // When both name= and basename= are present, name= wins.
+        let station_named = out.iter().find(|r| r.id == 0x21).unwrap();
+        assert_eq!(station_named.display_name_ref.as_deref(), Some("{20103,2001}"));
+
+        let renamed_ship = out.iter().find(|r| r.id == 0x30).unwrap();
+        assert_eq!(renamed_ship.display_name_ref.as_deref(), Some("My Best Ship"));
+
+        let pod = out.iter().find(|r| r.id == 0x40).unwrap();
+        assert_eq!(pod.display_name_ref, None);
     }
 
     #[test]
