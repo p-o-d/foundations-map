@@ -34,6 +34,10 @@ pub struct World {
     pub children: HashMap<EntityId, Vec<EntityId>>,
     pub codes: HashMap<EntityId, String>,
     pub trade_offers: HashMap<EntityId, Vec<TradeOffer>>,
+    /// Raw `name=` / `basename=` value from the save. Either a `{page,id}` ref,
+    /// a compound form `{p,t} ({p,t})`, or a literal string (player-renamed ships).
+    /// Resolved at display time so it picks up the current locale.
+    pub display_name_refs: HashMap<EntityId, String>,
 }
 
 impl World {
@@ -242,6 +246,16 @@ mod tests {
         assert_eq!(w.children_of(1), &[2]);
         assert_eq!(w.parent_of(1), None);
         assert_eq!(w.codes.get(&1).map(String::as_str), Some("YIB-1"));
+    }
+
+    #[test]
+    fn display_name_refs_round_trip() {
+        let mut w = World::new();
+        w.display_name_refs.insert(0x10, "{20101,122701}".into());
+        w.display_name_refs.insert(0x11, "My Best Ship".into());
+        assert_eq!(w.display_name_refs.get(&0x10).map(String::as_str), Some("{20101,122701}"));
+        assert_eq!(w.display_name_refs.get(&0x11).map(String::as_str), Some("My Best Ship"));
+        assert!(w.display_name_refs.get(&0x99).is_none());
     }
 
     #[test]
