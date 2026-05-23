@@ -159,8 +159,7 @@ fn scan_sectors(bytes: &[u8]) -> (FactionOverrides, Vec<SectorChunk>) {
                 // Not tracking anything; only care if this is a sector.
                 if let Some(class) = find_attr(tag, b"class") {
                     if class == b"sector" && !self_closing {
-                        let mac =
-                            find_attr(tag, b"macro").map(str_from).unwrap_or_default();
+                        let mac = find_attr(tag, b"macro").map(str_from).unwrap_or_default();
                         let macro_lower = mac.to_lowercase();
                         if let Some(owner) = find_attr(tag, b"owner").map(str_from) {
                             overrides.insert(macro_lower.clone(), owner);
@@ -181,9 +180,7 @@ fn scan_sectors(bytes: &[u8]) -> (FactionOverrides, Vec<SectorChunk>) {
             if sector_start.is_some() {
                 depth -= 1;
                 if depth == 0 {
-                    if let (Some(start), Some(mac)) =
-                        (sector_start.take(), sector_macro.take())
-                    {
+                    if let (Some(start), Some(mac)) = (sector_start.take(), sector_macro.take()) {
                         chunks.push(SectorChunk {
                             sector_macro: mac,
                             byte_range: start..pos,
@@ -265,7 +262,10 @@ mod tests {
         assert!((out.meta.game_time_seconds - 100.0).abs() < 1e-3);
         assert_eq!(out.meta.player_location_name, "{20004,1}");
 
-        assert_eq!(out.overrides.get("sectoramacro").map(String::as_str), Some("argon"));
+        assert_eq!(
+            out.overrides.get("sectoramacro").map(String::as_str),
+            Some("argon")
+        );
         assert_eq!(out.chunks.len(), 1);
 
         let chunk = &out.chunks[0];
@@ -322,6 +322,9 @@ mod tests {
         let out = run_scan(rx, "/tmp/x".into(), std::time::UNIX_EPOCH).unwrap();
         assert_eq!(out.chunks.len(), 1);
         assert_eq!(out.chunks[0].sector_macro, "sectormacro");
-        assert_eq!(out.overrides.get("sectormacro").map(String::as_str), Some("argon"));
+        assert_eq!(
+            out.overrides.get("sectormacro").map(String::as_str),
+            Some("argon")
+        );
     }
 }

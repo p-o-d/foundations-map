@@ -71,7 +71,12 @@ impl SectorPanel {
             .auto_shrink([false, false])
             .max_height(scroll_height)
             .show(ui, |ui| {
-                if let ViewMode::SectorView { selected_obj, selected_entity, .. } = view_mode {
+                if let ViewMode::SectorView {
+                    selected_obj,
+                    selected_entity,
+                    ..
+                } = view_mode
+                {
                     // ─── Static objects ──────────────────────────────────
                     egui::CollapsingHeader::new(format!(
                         "STATIC OBJECTS ({})",
@@ -82,7 +87,11 @@ impl SectorPanel {
                         for obj in &sector.static_objects {
                             let is_sel = *selected_obj == Some(obj.id);
                             let label = format!("{} {}", kind_icon(&obj.kind), &obj.name);
-                            let color = if is_sel { theme::ACCENT } else { theme::TEXT_PRIMARY };
+                            let color = if is_sel {
+                                theme::ACCENT
+                            } else {
+                                theme::TEXT_PRIMARY
+                            };
                             if ui.colored_label(color, &label).clicked() {
                                 object_clicked = Some(obj.id);
                             }
@@ -92,12 +101,18 @@ impl SectorPanel {
                     // ─── Live entities, grouped ──────────────────────────
                     if let Some(world) = world {
                         use map_domain::world::LiveObjectKind;
-                        let mut by_group: std::collections::HashMap<&'static str, Vec<map_domain::world::EntityId>> = std::collections::HashMap::new();
+                        let mut by_group: std::collections::HashMap<
+                            &'static str,
+                            Vec<map_domain::world::EntityId>,
+                        > = std::collections::HashMap::new();
                         for &eid in world.entities_in_sector(sector.id) {
-                            if world.parent_of(eid).is_some() { continue; }
+                            if world.parent_of(eid).is_some() {
+                                continue;
+                            }
                             let bucket = match world.kinds.get(&eid) {
                                 Some(LiveObjectKind::Station) => "STATIONS",
-                                Some(LiveObjectKind::ShipExtraLarge) | Some(LiveObjectKind::ShipLarge) => "CAPITALS",
+                                Some(LiveObjectKind::ShipExtraLarge)
+                                | Some(LiveObjectKind::ShipLarge) => "CAPITALS",
                                 Some(LiveObjectKind::ShipMedium) => "MEDIUM",
                                 Some(LiveObjectKind::ShipSmall) => "SMALL",
                                 None => continue,
@@ -112,15 +127,21 @@ impl SectorPanel {
                                         for &eid in eids {
                                             let is_sel = *selected_entity == Some(eid);
                                             let (label, icon) = entity_row_label(world, eid);
-                                            let color = if is_sel { theme::ACCENT } else { theme::TEXT_PRIMARY };
+                                            let color = if is_sel {
+                                                theme::ACCENT
+                                            } else {
+                                                theme::TEXT_PRIMARY
+                                            };
                                             let row = format!("{} {}", icon, label);
                                             if ui.colored_label(color, &row).clicked() {
                                                 entity_clicked = Some(eid);
                                             }
                                             // Faction line under the row.
                                             if let Some(&fid) = world.factions.get(&eid) {
-                                                let f_name = crate::colors::faction_name(universe, fid);
-                                                let f_color = crate::colors::faction_color(universe, fid);
+                                                let f_name =
+                                                    crate::colors::faction_name(universe, fid);
+                                                let f_color =
+                                                    crate::colors::faction_color(universe, fid);
                                                 ui.horizontal(|ui| {
                                                     ui.add_space(20.0);
                                                     ui.colored_label(f_color, "●");
@@ -140,7 +161,9 @@ impl SectorPanel {
                         ui.add_space(4.0);
                         ui.colored_label(theme::TEXT_MUTED, "SELECTED");
                         if let Some(parent) = world.and_then(|w| w.parent_of(eid)) {
-                            let parent_label = world.map(|w| entity_row_label(w, parent).0).unwrap_or_default();
+                            let parent_label = world
+                                .map(|w| entity_row_label(w, parent).0)
+                                .unwrap_or_default();
                             if ui.button(format!("← Back to {}", parent_label)).clicked() {
                                 back_to_parent_clicked = true;
                             }
@@ -183,7 +206,13 @@ impl SectorPanel {
                                     .show(ui, |ui| {
                                         for &cid in kids {
                                             let (clabel, cicon) = entity_row_label(world, cid);
-                                            if ui.colored_label(theme::TEXT_PRIMARY, format!("{} {}", cicon, clabel)).clicked() {
+                                            if ui
+                                                .colored_label(
+                                                    theme::TEXT_PRIMARY,
+                                                    format!("{} {}", cicon, clabel),
+                                                )
+                                                .clicked()
+                                            {
                                                 entity_clicked = Some(cid);
                                             }
                                         }
@@ -200,7 +229,10 @@ impl SectorPanel {
                         ui.colored_label(theme::TEXT_MUTED, "SELECTED");
                         ui.add_space(2.0);
                         ui.colored_label(theme::ACCENT, &obj.name);
-                        ui.colored_label(theme::TEXT_MUTED, format!("Type: {}", kind_label(&obj.kind)));
+                        ui.colored_label(
+                            theme::TEXT_MUTED,
+                            format!("Type: {}", kind_label(&obj.kind)),
+                        );
                         ui.colored_label(
                             theme::TEXT_MUTED,
                             format!(
@@ -371,28 +403,22 @@ fn render_offer_group(
                 .show(ui, |ui| {
                     for o in offers {
                         ui.colored_label(theme::TEXT_PRIMARY, name_for(o));
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.colored_label(
-                                    theme::TEXT_MUTED,
-                                    format!("{} Cr", fmt_thousands(o.price)),
-                                );
-                            },
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.colored_label(
-                                    theme::TEXT_MUTED,
-                                    format!(
-                                        "{} / {}",
-                                        fmt_thousands(o.amount),
-                                        fmt_thousands(o.desired),
-                                    ),
-                                );
-                            },
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.colored_label(
+                                theme::TEXT_MUTED,
+                                format!("{} Cr", fmt_thousands(o.price)),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.colored_label(
+                                theme::TEXT_MUTED,
+                                format!(
+                                    "{} / {}",
+                                    fmt_thousands(o.amount),
+                                    fmt_thousands(o.desired),
+                                ),
+                            );
+                        });
                         ui.end_row();
                     }
                 });
@@ -410,8 +436,14 @@ mod tests {
 
     #[test]
     fn strip_macro_removes_suffix_and_underscores() {
-        assert_eq!(crate::colors::strip_macro("cluster_709_sector001_macro"), "cluster 709 sector001");
-        assert_eq!(crate::colors::strip_macro("argon_prime_macro"), "argon prime");
+        assert_eq!(
+            crate::colors::strip_macro("cluster_709_sector001_macro"),
+            "cluster 709 sector001"
+        );
+        assert_eq!(
+            crate::colors::strip_macro("argon_prime_macro"),
+            "argon prime"
+        );
         assert_eq!(crate::colors::strip_macro("no_suffix"), "no suffix");
     }
 
@@ -424,10 +456,13 @@ mod tests {
         assert_eq!(fmt_thousands(1_234), "1,234");
         assert_eq!(fmt_thousands(1_234_567), "1,234,567");
         assert_eq!(fmt_thousands(-1_000), "-1,000");
-        assert_eq!(fmt_thousands(i64::MIN), format!("-{}", {
-            // The function uses unsigned_abs(), so this should not panic.
-            // i64::MIN.unsigned_abs() == 9_223_372_036_854_775_808
-            "9,223,372,036,854,775,808"
-        }));
+        assert_eq!(
+            fmt_thousands(i64::MIN),
+            format!("-{}", {
+                // The function uses unsigned_abs(), so this should not panic.
+                // i64::MIN.unsigned_abs() == 9_223_372_036_854_775_808
+                "9,223,372,036,854,775,808"
+            })
+        );
     }
 }

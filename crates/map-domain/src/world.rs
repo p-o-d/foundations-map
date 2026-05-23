@@ -219,12 +219,24 @@ mod tests {
     fn parent_child_links_track_correctly() {
         let mut w = World::new();
         w.insert_entity(
-            1, "station".into(), LiveObjectKind::Station,
-            None, Vec3::ZERO, sector_a(), None, Some("YIB-1".into()),
+            1,
+            "station".into(),
+            LiveObjectKind::Station,
+            None,
+            Vec3::ZERO,
+            sector_a(),
+            None,
+            Some("YIB-1".into()),
         );
         w.insert_entity(
-            2, "drone".into(), LiveObjectKind::ShipSmall,
-            None, Vec3::ZERO, sector_a(), Some(1), None,
+            2,
+            "drone".into(),
+            LiveObjectKind::ShipSmall,
+            None,
+            Vec3::ZERO,
+            sector_a(),
+            Some(1),
+            None,
         );
         assert_eq!(w.parent_of(2), Some(1));
         assert_eq!(w.children_of(1), &[2]);

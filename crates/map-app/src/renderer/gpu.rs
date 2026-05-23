@@ -47,10 +47,7 @@ pub struct GpuScene {
 }
 
 impl GpuScene {
-    pub fn new(
-        device: &wgpu::Device,
-        target_format: wgpu::TextureFormat,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("3d_scene"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SRC.into()),
@@ -198,7 +195,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         if self.draw_calls.len() > MAX_OBJECTS as usize {
             eprintln!(
                 "[render] WARNING: scene has {} draw calls but GPU cap is {}; truncating",
-                self.draw_calls.len(), MAX_OBJECTS
+                self.draw_calls.len(),
+                MAX_OBJECTS
             );
         }
         let n = self.draw_calls.len().min(MAX_OBJECTS as usize);

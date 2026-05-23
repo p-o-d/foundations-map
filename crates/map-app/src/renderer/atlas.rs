@@ -44,31 +44,34 @@ impl IconId {
             | IconId::PlayerStation
             | IconId::GenericStation => SuperCategory::Station,
 
-            IconId::Capital
-            | IconId::Medium
-            | IconId::Small
-            | IconId::Transport => SuperCategory::Ship,
+            IconId::Capital | IconId::Medium | IconId::Small | IconId::Transport => {
+                SuperCategory::Ship
+            }
 
-            IconId::Anomaly
-            | IconId::ResourceZone => SuperCategory::Static,
+            IconId::Anomaly | IconId::ResourceZone => SuperCategory::Static,
         }
     }
 }
 
-
-pub fn classify_live(
-    kind: LiveObjectKind,
-    macro_name: &str,
-    owner: Option<&str>,
-) -> IconId {
+pub fn classify_live(kind: LiveObjectKind, macro_name: &str, owner: Option<&str>) -> IconId {
     let m = macro_name.to_lowercase();
     match kind {
         LiveObjectKind::Station => {
-            if owner == Some("player") { return IconId::PlayerStation; }
-            if m.contains("wharf") || m.contains("shipyard") { return IconId::WharfShipyard; }
-            if m.contains("defence") || m.contains("defense") { return IconId::Defense; }
-            if m.contains("trading") { return IconId::Trading; }
-            if m.contains("equip") || m.contains("dock") { return IconId::EquipDock; }
+            if owner == Some("player") {
+                return IconId::PlayerStation;
+            }
+            if m.contains("wharf") || m.contains("shipyard") {
+                return IconId::WharfShipyard;
+            }
+            if m.contains("defence") || m.contains("defense") {
+                return IconId::Defense;
+            }
+            if m.contains("trading") {
+                return IconId::Trading;
+            }
+            if m.contains("equip") || m.contains("dock") {
+                return IconId::EquipDock;
+            }
             if m.contains("hq") || m.contains("admin") || m.contains("headquarter") {
                 return IconId::HQ;
             }
@@ -77,7 +80,9 @@ pub fn classify_live(
             }
             IconId::GenericStation
         }
-        _ if m.contains("trans") || m.contains("freight") || m.contains("miner") => IconId::Transport,
+        _ if m.contains("trans") || m.contains("freight") || m.contains("miner") => {
+            IconId::Transport
+        }
         LiveObjectKind::ShipExtraLarge | LiveObjectKind::ShipLarge => IconId::Capital,
         LiveObjectKind::ShipMedium => IconId::Medium,
         LiveObjectKind::ShipSmall => IconId::Small,
@@ -99,17 +104,38 @@ mod tests {
 
     #[test]
     fn classify_live_routes_factory_macro_to_factory_icon() {
-        assert_eq!(classify_live(LiveObjectKind::Station, "station_arg_factory_food_01_macro", Some("argon")), IconId::Factory);
+        assert_eq!(
+            classify_live(
+                LiveObjectKind::Station,
+                "station_arg_factory_food_01_macro",
+                Some("argon")
+            ),
+            IconId::Factory
+        );
     }
 
     #[test]
     fn classify_live_player_owner_wins_over_macro() {
-        assert_eq!(classify_live(LiveObjectKind::Station, "station_arg_factory_food_01_macro", Some("player")), IconId::PlayerStation);
+        assert_eq!(
+            classify_live(
+                LiveObjectKind::Station,
+                "station_arg_factory_food_01_macro",
+                Some("player")
+            ),
+            IconId::PlayerStation
+        );
     }
 
     #[test]
     fn classify_live_transport_keyword_overrides_size() {
-        assert_eq!(classify_live(LiveObjectKind::ShipLarge, "ship_arg_l_freighter_01_macro", Some("argon")), IconId::Transport);
+        assert_eq!(
+            classify_live(
+                LiveObjectKind::ShipLarge,
+                "ship_arg_l_freighter_01_macro",
+                Some("argon")
+            ),
+            IconId::Transport
+        );
     }
 
     #[test]
@@ -121,8 +147,14 @@ mod tests {
     #[test]
     fn super_category_station_variants() {
         for v in [
-            IconId::Factory, IconId::WharfShipyard, IconId::Defense, IconId::Trading,
-            IconId::EquipDock, IconId::HQ, IconId::PlayerStation, IconId::GenericStation,
+            IconId::Factory,
+            IconId::WharfShipyard,
+            IconId::Defense,
+            IconId::Trading,
+            IconId::EquipDock,
+            IconId::HQ,
+            IconId::PlayerStation,
+            IconId::GenericStation,
         ] {
             assert_eq!(v.super_category(), SuperCategory::Station, "{:?}", v);
         }
@@ -130,7 +162,12 @@ mod tests {
 
     #[test]
     fn super_category_ship_variants() {
-        for v in [IconId::Capital, IconId::Medium, IconId::Small, IconId::Transport] {
+        for v in [
+            IconId::Capital,
+            IconId::Medium,
+            IconId::Small,
+            IconId::Transport,
+        ] {
             assert_eq!(v.super_category(), SuperCategory::Ship, "{:?}", v);
         }
     }

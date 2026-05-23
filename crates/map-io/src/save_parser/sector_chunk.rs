@@ -322,19 +322,36 @@ mod tests {
 </component>"#;
         let out = parse_sector_chunk(chunk, "m");
         let station = out.iter().find(|r| r.id == 0x100).expect("station present");
-        assert_eq!(station.trade_offers.len(), 3, "expected 3 offers, got {:?}", station.trade_offers);
+        assert_eq!(
+            station.trade_offers.len(),
+            3,
+            "expected 3 offers, got {:?}",
+            station.trade_offers
+        );
 
-        let ec = station.trade_offers.iter().find(|o| o.ware_id == "energycells").unwrap();
+        let ec = station
+            .trade_offers
+            .iter()
+            .find(|o| o.ware_id == "energycells")
+            .unwrap();
         assert_eq!(ec.direction, TradeDirection::Buy);
         assert_eq!(ec.price, 1092);
         assert_eq!(ec.amount, 0);
         assert_eq!(ec.desired, 0, "desired absent ⇒ 0");
 
-        let sp = station.trade_offers.iter().find(|o| o.ware_id == "spices").unwrap();
+        let sp = station
+            .trade_offers
+            .iter()
+            .find(|o| o.ware_id == "spices")
+            .unwrap();
         assert_eq!(sp.direction, TradeDirection::Buy);
         assert_eq!(sp.desired, 4672);
 
-        let med = station.trade_offers.iter().find(|o| o.ware_id == "medicalsupplies").unwrap();
+        let med = station
+            .trade_offers
+            .iter()
+            .find(|o| o.ware_id == "medicalsupplies")
+            .unwrap();
         assert_eq!(med.direction, TradeDirection::Sell);
         assert_eq!(med.amount, 6299);
     }

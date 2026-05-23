@@ -23,10 +23,7 @@ fn parse_textref(s: &str) -> Option<(u32, u32)> {
 }
 
 /// Extract a single `<faction …/>` element into `out`.
-fn handle_faction(
-    e: &quick_xml::events::BytesStart<'_>,
-    out: &mut HashMap<String, FactionDef>,
-) {
+fn handle_faction(e: &quick_xml::events::BytesStart<'_>, out: &mut HashMap<String, FactionDef>) {
     let mut id_opt: Option<String> = None;
     let mut name_opt: Option<(u32, u32)> = None;
     for attr in e.attributes().filter_map(Result::ok) {
@@ -40,7 +37,13 @@ fn handle_faction(
     }
     if let (Some(id), Some(textref)) = (id_opt, name_opt) {
         let color_mapping = format!("faction_{}", id);
-        out.insert(id, FactionDef { name_textref: textref, color_mapping });
+        out.insert(
+            id,
+            FactionDef {
+                name_textref: textref,
+                color_mapping,
+            },
+        );
     }
 }
 
@@ -57,11 +60,16 @@ pub fn parse_factions_xml(xml: &str) -> HashMap<String, FactionDef> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"faction" => {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"faction" =>
+            {
                 handle_faction(e, &mut out);
             }
             Ok(Event::Eof) => break,
-            Err(e) => { eprintln!("[map] parse_factions_xml: XML error: {e}"); break; }
+            Err(e) => {
+                eprintln!("[map] parse_factions_xml: XML error: {e}");
+                break;
+            }
             _ => {}
         }
         buf.clear();
@@ -84,25 +92,23 @@ pub fn parse_colors_xml(xml: &str) -> (HashMap<String, [u8; 4]>, HashMap<String,
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                match e.name().as_ref() {
-                    b"color" => {
-                        if let Some(id) = attr_str(e, b"id") {
-                            let r = attr_u8(e, b"r").unwrap_or(0);
-                            let g = attr_u8(e, b"g").unwrap_or(0);
-                            let b = attr_u8(e, b"b").unwrap_or(0);
-                            let a = attr_u8(e, b"a").unwrap_or(255);
-                            colors.insert(id, [r, g, b, a]);
-                        }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => match e.name().as_ref() {
+                b"color" => {
+                    if let Some(id) = attr_str(e, b"id") {
+                        let r = attr_u8(e, b"r").unwrap_or(0);
+                        let g = attr_u8(e, b"g").unwrap_or(0);
+                        let b = attr_u8(e, b"b").unwrap_or(0);
+                        let a = attr_u8(e, b"a").unwrap_or(255);
+                        colors.insert(id, [r, g, b, a]);
                     }
-                    b"mapping" => {
-                        if let (Some(id), Some(rf)) = (attr_str(e, b"id"), attr_str(e, b"ref")) {
-                            mappings.insert(id, rf);
-                        }
-                    }
-                    _ => {}
                 }
-            }
+                b"mapping" => {
+                    if let (Some(id), Some(rf)) = (attr_str(e, b"id"), attr_str(e, b"ref")) {
+                        mappings.insert(id, rf);
+                    }
+                }
+                _ => {}
+            },
             Ok(Event::Eof) => break,
             Err(e) => {
                 eprintln!("[map] parse_colors_xml: XML error: {e}");
@@ -127,7 +133,8 @@ pub fn resolve_faction_color(
 }
 
 fn attr_str(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<String> {
-    e.attributes().filter_map(Result::ok)
+    e.attributes()
+        .filter_map(Result::ok)
         .find(|a| a.key.as_ref() == name)
         .and_then(|a| String::from_utf8(a.value.into_owned()).ok())
 }
@@ -163,8 +170,7 @@ mod tests {
 
     fn fixture_colors() -> String {
         std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/colors_mini.xml"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/colors_mini.xml"),
         )
         .unwrap()
     }
@@ -173,7 +179,10 @@ mod tests {
     fn parse_colors_resolves_mapping_chain() {
         let (colors, mappings) = parse_colors_xml(&fixture_colors());
         assert_eq!(colors.get("azure_dark"), Some(&[40, 100, 180, 220]));
-        assert_eq!(mappings.get("faction_argon"), Some(&"azure_dark".to_string()));
+        assert_eq!(
+            mappings.get("faction_argon"),
+            Some(&"azure_dark".to_string())
+        );
 
         let resolved = resolve_faction_color("faction_argon", &colors, &mappings);
         assert_eq!(resolved, Some([40, 100, 180, 220]));
@@ -184,9 +193,11 @@ mod tests {
 
     #[test]
     fn resolve_faction_color_handles_dangling_mapping() {
-        let mut colors: std::collections::HashMap<String, [u8; 4]> = std::collections::HashMap::new();
+        let mut colors: std::collections::HashMap<String, [u8; 4]> =
+            std::collections::HashMap::new();
         colors.insert("real_color".into(), [1, 2, 3, 4]);
-        let mut mappings: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut mappings: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         mappings.insert("faction_x".into(), "missing_color".into());
 
         // Mapping exists but its ref points to a colour not in the colors map.

@@ -68,15 +68,25 @@ mod tests {
     fn merges_records_and_assigns_faction_ids() {
         let records = vec![
             EntityRecord {
-                id: 0x10, parent_id: None, macro_name: "station_a".into(), code: None,
-                kind: LiveObjectKind::Station, owner: Some("argon".into()),
-                position: glam::Vec3::ZERO, sector_macro: "sa".into(),
+                id: 0x10,
+                parent_id: None,
+                macro_name: "station_a".into(),
+                code: None,
+                kind: LiveObjectKind::Station,
+                owner: Some("argon".into()),
+                position: glam::Vec3::ZERO,
+                sector_macro: "sa".into(),
                 trade_offers: vec![],
             },
             EntityRecord {
-                id: 0x11, parent_id: Some(0x10), macro_name: "drone".into(), code: Some("D-1".into()),
-                kind: LiveObjectKind::ShipSmall, owner: Some("argon".into()),
-                position: glam::Vec3::ZERO, sector_macro: "sa".into(),
+                id: 0x11,
+                parent_id: Some(0x10),
+                macro_name: "drone".into(),
+                code: Some("D-1".into()),
+                kind: LiveObjectKind::ShipSmall,
+                owner: Some("argon".into()),
+                position: glam::Vec3::ZERO,
+                sector_macro: "sa".into(),
                 trade_offers: vec![],
             },
         ];
@@ -96,9 +106,14 @@ mod tests {
     #[test]
     fn unknown_sector_drops_entity() {
         let records = vec![EntityRecord {
-            id: 0xFFFF, parent_id: None, macro_name: "x".into(), code: None,
-            kind: LiveObjectKind::ShipSmall, owner: None,
-            position: glam::Vec3::ZERO, sector_macro: "unknown".into(),
+            id: 0xFFFF,
+            parent_id: None,
+            macro_name: "x".into(),
+            code: None,
+            kind: LiveObjectKind::ShipSmall,
+            owner: None,
+            position: glam::Vec3::ZERO,
+            sector_macro: "unknown".into(),
             trade_offers: vec![],
         }];
         let sm: HashMap<String, SectorId> = HashMap::new();
@@ -111,9 +126,14 @@ mod tests {
     #[test]
     fn no_sector_macros_drops_all() {
         let records = vec![EntityRecord {
-            id: 1, parent_id: None, macro_name: "x".into(), code: None,
-            kind: LiveObjectKind::Station, owner: None,
-            position: glam::Vec3::ZERO, sector_macro: "anything".into(),
+            id: 1,
+            parent_id: None,
+            macro_name: "x".into(),
+            code: None,
+            kind: LiveObjectKind::Station,
+            owner: None,
+            position: glam::Vec3::ZERO,
+            sector_macro: "anything".into(),
             trade_offers: vec![],
         }];
         let mut fs = HashMap::new();

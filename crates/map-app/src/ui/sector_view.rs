@@ -142,13 +142,21 @@ impl SectorView3D {
                 clicked = pick_target(pos, view_rect, camera, sec, world);
             }
         }
-        let hovered = canvas_resp.hover_pos().and_then(|pos| {
-            sector.and_then(|sec| pick_target(pos, view_rect, camera, sec, world))
-        });
+        let hovered = canvas_resp
+            .hover_pos()
+            .and_then(|pos| sector.and_then(|sec| pick_target(pos, view_rect, camera, sec, world)));
 
         // Hover label: tooltip-style box over the hovered target
         if let (Some(target), Some(sec)) = (hovered, sector) {
-            draw_hover_label(ui.painter(), view_rect, camera, sec, world, universe, target);
+            draw_hover_label(
+                ui.painter(),
+                view_rect,
+                camera,
+                sec,
+                world,
+                universe,
+                target,
+            );
         }
 
         // Border around canvas
@@ -193,7 +201,7 @@ fn draw_icons_2d(
     selected_obj: Option<ObjectId>,
     selected_entity: Option<map_domain::world::EntityId>,
 ) {
-    use crate::renderer::atlas::{classify_live, classify_static, IconId, SuperCategory};
+    use crate::renderer::atlas::{IconId, SuperCategory, classify_live, classify_static};
     use crate::renderer::icons;
 
     let aspect = view_rect.width() / view_rect.height().max(1.0);
@@ -201,9 +209,13 @@ fn draw_icons_2d(
 
     let project = |w_pos: Vec3| -> Option<Pos2> {
         let clip = vp * w_pos.extend(1.0);
-        if clip.w <= 0.0 { return None; }
+        if clip.w <= 0.0 {
+            return None;
+        }
         let ndc = clip.truncate() / clip.w;
-        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 { return None; }
+        if ndc.x.abs() > 1.5 || ndc.y.abs() > 1.5 {
+            return None;
+        }
         Some(Pos2::new(
             (ndc.x * 0.5 + 0.5) * view_rect.width() + view_rect.left(),
             (1.0 - (ndc.y * 0.5 + 0.5)) * view_rect.height() + view_rect.top(),
@@ -216,20 +228,31 @@ fn draw_icons_2d(
         } else {
             (icons::HALF_NORMAL, icons::STROKE_NORMAL)
         };
-        let frame_color = if selected { icons::SELECTION_COLOR } else { faction_color };
+        let frame_color = if selected {
+            icons::SELECTION_COLOR
+        } else {
+            faction_color
+        };
         match icon.super_category() {
-            SuperCategory::Station => icons::draw_station_frame(painter, screen, half, stroke, frame_color),
-            SuperCategory::Ship    => {} // ships render glyph only, no frame
-            SuperCategory::Static  => icons::draw_static_frame(painter, screen, half, stroke),
+            SuperCategory::Station => {
+                icons::draw_station_frame(painter, screen, half, stroke, frame_color)
+            }
+            SuperCategory::Ship => {} // ships render glyph only, no frame
+            SuperCategory::Static => icons::draw_static_frame(painter, screen, half, stroke),
         }
         icons::draw_glyph(painter, icon, screen, half, frame_color);
     };
 
     // Static objects.
     for obj in &sector.static_objects {
-        let Some(icon) = classify_static(&obj.kind) else { continue };
-        let Some(screen) = project(obj.position) else { continue };
-        let ring = obj.faction
+        let Some(icon) = classify_static(&obj.kind) else {
+            continue;
+        };
+        let Some(screen) = project(obj.position) else {
+            continue;
+        };
+        let ring = obj
+            .faction
             .map(|f| crate::colors::faction_color(universe, f))
             .unwrap_or(crate::theme::TEXT_MUTED);
         emit(screen, icon, ring, selected_obj == Some(obj.id));
@@ -243,14 +266,27 @@ fn draw_icons_2d(
             fid_to_str.insert(*v, k.as_str());
         }
         for &eid in world.entities_in_sector(sector.id) {
-            if world.parent_of(eid).is_some() { continue; }
-            let Some(&pos) = world.positions.get(&eid) else { continue };
-            let kind = match world.kinds.get(&eid) { Some(k) => k.clone(), None => continue };
+            if world.parent_of(eid).is_some() {
+                continue;
+            }
+            let Some(&pos) = world.positions.get(&eid) else {
+                continue;
+            };
+            let kind = match world.kinds.get(&eid) {
+                Some(k) => k.clone(),
+                None => continue,
+            };
             let Some(screen) = project(pos) else { continue };
             let macro_name = world.names.get(&eid).map(String::as_str).unwrap_or("");
-            let owner_str = world.factions.get(&eid).and_then(|f| fid_to_str.get(f).copied());
+            let owner_str = world
+                .factions
+                .get(&eid)
+                .and_then(|f| fid_to_str.get(f).copied());
             let icon = classify_live(kind, macro_name, owner_str);
-            let ring = world.factions.get(&eid).copied()
+            let ring = world
+                .factions
+                .get(&eid)
+                .copied()
                 .map(|f| crate::colors::faction_color(universe, f))
                 .unwrap_or(crate::theme::TEXT_MUTED);
             emit(screen, icon, ring, selected_entity == Some(eid));
@@ -282,12 +318,13 @@ fn pick_target(
         ))
     };
 
-    let consider = |sp: egui::Pos2, target: ClickedTarget, best: &mut Option<(f32, ClickedTarget)>| {
-        let d = ((sp.x - ptr.x).powi(2) + (sp.y - ptr.y).powi(2)).sqrt();
-        if d < 24.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
-            *best = Some((d, target));
-        }
-    };
+    let consider =
+        |sp: egui::Pos2, target: ClickedTarget, best: &mut Option<(f32, ClickedTarget)>| {
+            let d = ((sp.x - ptr.x).powi(2) + (sp.y - ptr.y).powi(2)).sqrt();
+            if d < 24.0 && best.as_ref().map_or(true, |(b, _)| d < *b) {
+                *best = Some((d, target));
+            }
+        };
 
     for obj in &sector.static_objects {
         if let Some(sp) = project(obj.position) {

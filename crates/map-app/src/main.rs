@@ -43,7 +43,8 @@ fn main() -> eframe::Result<()> {
     std::thread::spawn(move || {
         let mut fs = fs_init;
         let mut nx = nx_init;
-        let msg = parse_latest_save(&sector_macros, &mut fs, &mut nx).unwrap_or(SnapshotMessage::None);
+        let msg =
+            parse_latest_save(&sector_macros, &mut fs, &mut nx).unwrap_or(SnapshotMessage::None);
         let _ = initial_tx.send(msg);
     });
 
@@ -204,7 +205,12 @@ pub fn parse_latest_save(
 ) -> Option<SnapshotMessage> {
     let (path, _dir) = find_latest_save()?;
     eprintln!("[map] Loading save: {:?}", path);
-    match map_io::save_parser::parse_save(&path, Some(sector_macros), faction_strings, next_faction_id) {
+    match map_io::save_parser::parse_save(
+        &path,
+        Some(sector_macros),
+        faction_strings,
+        next_faction_id,
+    ) {
         Ok((meta, world, faction_overrides)) => {
             eprintln!(
                 "[map] Snapshot: time={:.1}s money={} location={}",

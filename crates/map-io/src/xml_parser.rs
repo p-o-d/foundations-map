@@ -490,12 +490,14 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
             &mappings_map,
         )
         .unwrap_or([192, 192, 192, 255]);
-        universe
-            .faction_strings
-            .insert(faction_id_str.clone(), fid);
-        universe
-            .faction_table
-            .insert(fid, map_domain::universe::FactionMeta { display_name, color });
+        universe.faction_strings.insert(faction_id_str.clone(), fid);
+        universe.faction_table.insert(
+            fid,
+            map_domain::universe::FactionMeta {
+                display_name,
+                color,
+            },
+        );
     }
     eprintln!(
         "[map] Built faction table: {} factions",
@@ -1291,8 +1293,6 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
     result
 }
 
-
-
 /// Classify a static object by its macro reference name.
 fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
     let lower = macro_ref.to_lowercase();
@@ -1792,9 +1792,7 @@ pub fn parse_ware_names_xml(
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
-                if e.name().as_ref() == b"ware" =>
-            {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"ware" => {
                 let Some(id) = attr_value(e, b"id") else {
                     continue;
                 };
@@ -1834,8 +1832,14 @@ mod tests {
   </page>
 </language>"#;
         let map = super::parse_translations_xml(xml).unwrap();
-        assert_eq!(map.get(&(20201, 1101)).map(String::as_str), Some("Energy Cells"));
-        assert_eq!(map.get(&(20201, 1102)).map(String::as_str), Some("Medical Supplies"));
+        assert_eq!(
+            map.get(&(20201, 1101)).map(String::as_str),
+            Some("Energy Cells")
+        );
+        assert_eq!(
+            map.get(&(20201, 1102)).map(String::as_str),
+            Some("Medical Supplies")
+        );
     }
 
     #[test]
@@ -1853,8 +1857,7 @@ mod tests {
     #[test]
     fn parse_ware_names_resolves_translations_literals_and_falls_back() {
         let xml = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/wares_mini.xml"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wares_mini.xml"),
         )
         .unwrap();
         let mut translations: HashMap<(u32, u32), String> = HashMap::new();
@@ -1863,11 +1866,23 @@ mod tests {
 
         let names = super::parse_ware_names_xml(&xml, &translations);
 
-        assert_eq!(names.get("energycells").map(String::as_str), Some("Energy Cells"));
-        assert_eq!(names.get("medicalsupplies").map(String::as_str), Some("Medical Supplies"));
-        assert_eq!(names.get("literalwell").map(String::as_str), Some("Hand-Written Name"));
+        assert_eq!(
+            names.get("energycells").map(String::as_str),
+            Some("Energy Cells")
+        );
+        assert_eq!(
+            names.get("medicalsupplies").map(String::as_str),
+            Some("Medical Supplies")
+        );
+        assert_eq!(
+            names.get("literalwell").map(String::as_str),
+            Some("Hand-Written Name")
+        );
         // Unknown translation key falls back to raw ware id.
-        assert_eq!(names.get("unknownware").map(String::as_str), Some("unknownware"));
+        assert_eq!(
+            names.get("unknownware").map(String::as_str),
+            Some("unknownware")
+        );
         // <missingid> has no `id` attribute — skipped.
         assert!(names.get("missingid").is_none());
     }

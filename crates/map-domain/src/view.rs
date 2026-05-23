@@ -97,7 +97,9 @@ impl ViewMode {
 
     pub fn selected_entity(&self) -> Option<EntityId> {
         match self {
-            ViewMode::SectorView { selected_entity, .. } => *selected_entity,
+            ViewMode::SectorView {
+                selected_entity, ..
+            } => *selected_entity,
             _ => None,
         }
     }

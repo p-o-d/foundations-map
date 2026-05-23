@@ -78,7 +78,12 @@ pub fn parse_save(
 
     // Stage 4: merge.
     let t_stage4 = Instant::now();
-    let world = merge::merge(entity_lists, sector_macros, faction_strings, next_faction_id);
+    let world = merge::merge(
+        entity_lists,
+        sector_macros,
+        faction_strings,
+        next_faction_id,
+    );
     let stage4_ms = t_stage4.elapsed().as_millis();
 
     let total_ms = t_total.elapsed().as_millis();
@@ -103,7 +108,8 @@ mod tests {
     fn parse_mini_save_meta_and_overrides() {
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut nx = 1u32;
-        let (meta, _world, overrides) = parse_save(&fixture_path(), None, &mut fs, &mut nx).unwrap();
+        let (meta, _world, overrides) =
+            parse_save(&fixture_path(), None, &mut fs, &mut nx).unwrap();
         assert_eq!(meta.player_money, 40000);
         assert!((meta.game_time_seconds - 1734.285).abs() < 1e-2);
         assert_eq!(meta.player_location_name, "{20004,10011}");

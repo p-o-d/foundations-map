@@ -29,8 +29,7 @@ pub struct Decompressor {
 /// after the channel disconnects.
 pub fn spawn_decompressor(path: &Path) -> std::io::Result<Decompressor> {
     let file = File::open(path)?;
-    let (tx, rx): (SyncSender<Vec<u8>>, Receiver<Vec<u8>>) =
-        mpsc::sync_channel(CHANNEL_CAPACITY);
+    let (tx, rx): (SyncSender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::sync_channel(CHANNEL_CAPACITY);
     let handle = std::thread::spawn(move || pump(file, tx));
     Ok(Decompressor { rx, handle })
 }
@@ -72,7 +71,9 @@ mod tests {
 
     #[test]
     fn producer_streams_chunks_until_eof() {
-        let payload: Vec<u8> = (0..200_000u32).flat_map(|i| (i as u8).to_le_bytes()).collect();
+        let payload: Vec<u8> = (0..200_000u32)
+            .flat_map(|i| (i as u8).to_le_bytes())
+            .collect();
         let gz = make_gzipped(&payload);
         let f = write_temp_gz(&gz);
 

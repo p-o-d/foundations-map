@@ -154,17 +154,27 @@ mod tests {
         u.faction_strings.insert("argon".into(), FactionId(1));
         u.faction_table.insert(
             FactionId(1),
-            FactionMeta { display_name: "Argon Federation".into(), color: [50, 120, 255, 255] },
+            FactionMeta {
+                display_name: "Argon Federation".into(),
+                color: [50, 120, 255, 255],
+            },
         );
         assert_eq!(u.faction_strings.get("argon"), Some(&FactionId(1)));
-        assert_eq!(u.faction_table.get(&FactionId(1)).unwrap().display_name, "Argon Federation");
+        assert_eq!(
+            u.faction_table.get(&FactionId(1)).unwrap().display_name,
+            "Argon Federation"
+        );
     }
 
     #[test]
     fn ware_names_can_be_populated() {
         let mut u = Universe::default();
-        u.ware_names.insert("energycells".into(), "Energy Cells".into());
-        assert_eq!(u.ware_names.get("energycells").map(String::as_str), Some("Energy Cells"));
+        u.ware_names
+            .insert("energycells".into(), "Energy Cells".into());
+        assert_eq!(
+            u.ware_names.get("energycells").map(String::as_str),
+            Some("Energy Cells")
+        );
         assert!(u.ware_names.get("missing").is_none());
     }
 }
