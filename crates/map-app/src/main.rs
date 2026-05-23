@@ -118,7 +118,7 @@ fn load_universe() -> map_domain::universe::Universe {
 
     eprintln!("[map] Found game at: {:?}", game_dir);
 
-    match map_io::xml_parser::parse_galaxy_from_game(&game_dir) {
+    match map_io::xml_parser::parse_galaxy_from_game(&game_dir, 44) {
         Ok(universe) => {
             eprintln!("[map] Loaded {} sectors.", universe.sectors.len());
             universe

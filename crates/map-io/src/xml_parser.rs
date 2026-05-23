@@ -50,14 +50,15 @@ fn attr_value(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> 
 /// - `maps/xu_ep2_universe/clusters.xml` — sector macro refs + relative offsets per cluster
 /// - `libraries/mapdefaults.xml`          — sector macro → `{pageId,textId}` name reference
 /// - `t/0001-l{locale}.xml`              — translations for detected Steam language
-pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
+pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, ParseError> {
     let load = |path: &str| {
         crate::cat_reader::read_game_file(game_dir, path).ok_or_else(|| {
             ParseError::MissingAttribute(format!("{path} not found in cat archives"))
         })
     };
 
-    let translations_data = load("t/0001-l044.xml")?;
+    let translations_path = format!("t/0001-l{:03}.xml", locale);
+    let translations_data = load(&translations_path)?;
     let translations_str = String::from_utf8_lossy(&translations_data);
 
     // Scan all universe map XML files (main + every DLC) once.
@@ -462,6 +463,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
+    let available_locales = crate::game_path::list_available_locales(game_dir);
     let mut universe = Universe {
         sectors,
         clusters,
@@ -470,9 +472,9 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         faction_strings: HashMap::new(),
         faction_table: HashMap::new(),
         ware_names,
-        translations: HashMap::new(),
-        available_locales: Vec::new(),
-        current_locale: 44,
+        translations,
+        available_locales,
+        current_locale: locale,
     };
 
     // Assign sequential FactionIds and populate the faction table.
@@ -483,7 +485,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         let def = &faction_defs[faction_id_str];
         let fid = map_domain::ids::FactionId(next_id);
         next_id += 1;
-        let display_name = translations
+        let display_name = universe.translations
             .get(&def.name_textref)
             .cloned()
             .unwrap_or_else(|| faction_id_str.clone());
