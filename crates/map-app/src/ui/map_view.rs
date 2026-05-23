@@ -545,13 +545,28 @@ fn draw_count_badge(painter: &egui::Painter, center: Pos2, count: usize, bg: egu
     } else {
         count.to_string()
     };
+    let fg = contrast_text_color(bg);
     let font = egui::FontId::proportional(9.0);
-    let galley = painter.layout_no_wrap(label, font, egui::Color32::WHITE);
+    let galley = painter.layout_no_wrap(label, font, fg);
     let pad = egui::Vec2::new(4.0, 1.0);
     let badge_size = galley.size() + pad * 2.0;
     let badge_rect = egui::Rect::from_center_size(center, badge_size);
     painter.rect_filled(badge_rect, egui::CornerRadius::same(3), bg);
-    painter.galley(badge_rect.min + pad, galley, egui::Color32::WHITE);
+    painter.galley(badge_rect.min + pad, galley, fg);
+}
+
+/// Pick black or white text depending on background luminance. Uses the
+/// standard sRGB relative-luminance formula; threshold tuned for readability
+/// against egui's antialiased text.
+fn contrast_text_color(bg: egui::Color32) -> egui::Color32 {
+    let [r, g, b, _] = bg.to_array();
+    let luminance =
+        0.2126 * (r as f32) + 0.7152 * (g as f32) + 0.0722 * (b as f32);
+    if luminance > 140.0 {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::WHITE
+    }
 }
 
 #[cfg(test)]
