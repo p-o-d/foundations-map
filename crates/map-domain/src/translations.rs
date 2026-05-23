@@ -28,7 +28,22 @@ fn x4_display_name_inner(
 
     if let Some(rest) = trimmed.strip_prefix('(') {
         if let Some(close) = find_unescaped(rest, ')') {
-            return unescape_parens(rest[..close].trim());
+            let inner = rest[..close].trim();
+            let after = rest[close + 1..].trim();
+            if after.is_empty() {
+                // Pure `(NAME)` — the parenthetical is the display.
+                return unescape_parens(inner);
+            }
+            // `(HINT)body…` — the leading paren is the translator's English
+            // hint for what `body` will resolve to. Always prefer the
+            // substituted body so localized refs win over the English hint.
+            let substituted = if depth >= MAX_RECURSION_DEPTH {
+                after.to_string()
+            } else {
+                substitute_refs(after, translations, depth)
+            };
+            let stripped = strip_trailing_paren(substituted.trim());
+            return unescape_parens(stripped.trim());
         }
     }
 
@@ -190,7 +205,7 @@ mod tests {
         );
         // Variant with escaped parens.
         m.insert((20101, 10801), "Drill".into());
-        m.insert((20111, 3101), "(Mineral)".into());
+        m.insert((20111, 3101), "\\(Mineral\\)".into());
         m.insert((20111, 1101), "Vanguard".into());
         // We test the leading-paren form for this case explicitly below.
         m
@@ -238,9 +253,16 @@ mod tests {
 
     #[test]
     fn leading_paren_with_escaped_inner_parens_unescaped() {
+        // Real X4 entry for `{20101,10802}` (Drill (Mineral) Vanguard) has
+        // three sub-refs after the leading parenthetical hint. The hint is
+        // English-only even in localized files, so we ignore it and compose
+        // the display from the refs.
         let t = ship_translations();
         assert_eq!(
-            x4_display_name("(Drill \\(Mineral\\) Vanguard){20101,10801}", &t),
+            x4_display_name(
+                "(Drill \\(Mineral\\) Vanguard){20101,10801} {20111,3101} {20111,1101}",
+                &t
+            ),
             "Drill (Mineral) Vanguard"
         );
     }
@@ -320,6 +342,25 @@ mod tests {
         let t = HashMap::new();
         assert_eq!(x4_display_name("{not,a,ref}", &t), "{not,a,ref}");
         assert_eq!(x4_display_name("{", &t), "{");
+    }
+
+    #[test]
+    fn leading_paren_hint_ignored_when_refs_follow() {
+        // X4 entries of the form `(English Hint){p,t} {p,t}` leave the
+        // parenthetical in English even in localized files; the refs ARE
+        // localized. Substituting refs and ignoring the hint produces the
+        // correct localized name.
+        let mut t = HashMap::new();
+        t.insert((20202, 301), "Сплит".into()); // Split (faction adjective, RU)
+        t.insert((20104, 11501), "Производство медикаментов".into()); // RU
+        t.insert(
+            (20104, 15001),
+            "(Split Medical Supply Production){20202,301} {20104,11501}".into(),
+        );
+        assert_eq!(
+            x4_display_name("{20104,15001}", &t),
+            "Сплит Производство медикаментов"
+        );
     }
 
     #[test]
