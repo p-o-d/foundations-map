@@ -28,6 +28,9 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
     // True while inside an `<offers>` element. `<trade>` elements inside this
     // scope (with a buyer= or seller= attribute) are offers, not in-flight trades.
     let mut in_offers: bool = false;
+    // Counters to track <construction><sequence> nesting for prod_* detection.
+    let mut in_construction: u32 = 0;
+    let mut in_seq_under_construction: u32 = 0;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -52,6 +55,7 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                             sector_macro: sector_macro.to_string(),
                             trade_offers: std::mem::take(&mut p.trade_offers),
                             display_name_ref: p.display_name_ref.take(),
+                            production_module_macro: p.production_module_macro.take(),
                         });
                     }
                 }
@@ -68,6 +72,40 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
             }
             Ok(Event::End(ref e)) if e.name().as_ref() == b"offers" => {
                 in_offers = false;
+            }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"construction" => {
+                in_construction += 1;
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"construction" => {
+                if in_construction > 0 {
+                    in_construction -= 1;
+                    // Any open sequences from inside this construction are now closed.
+                    // (In practice sequences don't outlive their construction.)
+                }
+            }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"sequence" => {
+                if in_construction > 0 {
+                    in_seq_under_construction += 1;
+                }
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"sequence" => {
+                if in_seq_under_construction > 0 {
+                    in_seq_under_construction -= 1;
+                }
+            }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"entry" && in_seq_under_construction > 0 =>
+            {
+                if let Some(macro_val) = attr_str(e, b"macro") {
+                    let macro_lc = macro_val.to_lowercase();
+                    if macro_lc.starts_with("prod_") {
+                        if let Some(top) = stack.last_mut() {
+                            if top.production_module_macro.is_none() {
+                                top.production_module_macro = Some(macro_lc);
+                            }
+                        }
+                    }
+                }
             }
             Ok(Event::Empty(ref e)) if e.name().as_ref() == b"position" => {
                 // Only attribute position to the top pending entity if THIS <offset> sits
@@ -113,6 +151,7 @@ struct Pending {
     position: Option<Vec3>,
     trade_offers: Vec<TradeOffer>,
     display_name_ref: Option<String>,
+    production_module_macro: Option<String>,
 }
 
 fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Option<Pending> {
@@ -147,6 +186,7 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         position: None,
         trade_offers: Vec::new(),
         display_name_ref,
+        production_module_macro: None,
     })
 }
 
@@ -431,6 +471,43 @@ mod tests {
 
         let pod = out.iter().find(|r| r.id == 0x40).unwrap();
         assert_eq!(pod.display_name_ref, None);
+    }
+
+    #[test]
+    fn captures_first_prod_module_in_station_construction() {
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="station" macro="station_gen_factory_base_01_macro" id="[0x100]">
+    <offset><position x="0" y="0" z="0"/></offset>
+    <construction>
+      <sequence>
+        <entry id="[0x1]" index="1" macro="pier_spl_harbor_01_macro"/>
+        <entry id="[0x2]" index="2" macro="prod_gen_microchips_macro"/>
+        <entry id="[0x3]" index="3" macro="prod_gen_energycells_macro"/>
+      </sequence>
+    </construction>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let st = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert_eq!(
+            st.production_module_macro.as_deref(),
+            Some("prod_gen_microchips_macro")
+        );
+    }
+
+    #[test]
+    fn no_production_module_when_none_present() {
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="station" macro="x" id="[0x100]">
+    <offset><position x="0" y="0" z="0"/></offset>
+    <construction><sequence>
+      <entry id="[0x1]" macro="pier_arg_harbor_01_macro"/>
+    </sequence></construction>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let st = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert_eq!(st.production_module_macro, None);
     }
 
     #[test]

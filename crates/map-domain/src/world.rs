@@ -38,6 +38,11 @@ pub struct World {
     /// a compound form `{p,t} ({p,t})`, or a literal string (player-renamed ships).
     /// Resolved at display time so it picks up the current locale.
     pub display_name_refs: HashMap<EntityId, String>,
+    /// Per-station production-module macro (lowercase). Captured from the
+    /// first `<entry macro="prod_*"/>` inside `<construction><sequence>`.
+    /// Resolved at display time so the station shows e.g. "Microchip
+    /// Production" instead of the generic basename "Factory".
+    pub production_modules: HashMap<EntityId, String>,
 }
 
 impl World {
@@ -262,6 +267,17 @@ mod tests {
             Some("My Best Ship")
         );
         assert!(w.display_name_refs.get(&0x99).is_none());
+    }
+
+    #[test]
+    fn production_modules_round_trip() {
+        let mut w = World::new();
+        w.production_modules
+            .insert(0x100, "prod_gen_microchips_macro".into());
+        assert_eq!(
+            w.production_modules.get(&0x100).map(String::as_str),
+            Some("prod_gen_microchips_macro")
+        );
     }
 
     #[test]

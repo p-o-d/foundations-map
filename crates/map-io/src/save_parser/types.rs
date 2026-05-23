@@ -29,6 +29,7 @@ pub struct EntityRecord {
     pub sector_macro: String, // lowercase
     pub trade_offers: Vec<TradeOffer>,
     pub display_name_ref: Option<String>,
+    pub production_module_macro: Option<String>,
 }
 
 #[cfg(test)]
@@ -59,9 +60,11 @@ mod tests {
             sector_macro: "cluster_01_sector001_macro".into(),
             trade_offers: vec![],
             display_name_ref: Some("{20102,1701}".into()),
+            production_module_macro: None,
         };
         assert_eq!(e.id, 0x100);
         assert_eq!(e.display_name_ref.as_deref(), Some("{20102,1701}"));
         assert!(e.trade_offers.is_empty());
+        assert_eq!(e.production_module_macro, None);
     }
 }

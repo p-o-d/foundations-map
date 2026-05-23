@@ -38,6 +38,7 @@ pub fn merge(
             let entity_id = r.id;
             let trade_offers = r.trade_offers;
             let display_name_ref = r.display_name_ref;
+            let production_module_macro = r.production_module_macro;
             world.insert_entity(
                 entity_id,
                 r.macro_name,
@@ -53,6 +54,9 @@ pub fn merge(
             }
             if let Some(name_ref) = display_name_ref {
                 world.display_name_refs.insert(entity_id, name_ref);
+            }
+            if let Some(mc) = production_module_macro {
+                world.production_modules.insert(entity_id, mc.to_lowercase());
             }
         }
     }
@@ -82,6 +86,7 @@ mod tests {
                 sector_macro: "sa".into(),
                 trade_offers: vec![],
                 display_name_ref: None,
+                production_module_macro: None,
             },
             EntityRecord {
                 id: 0x11,
@@ -94,6 +99,7 @@ mod tests {
                 sector_macro: "sa".into(),
                 trade_offers: vec![],
                 display_name_ref: None,
+                production_module_macro: None,
             },
         ];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
@@ -122,6 +128,7 @@ mod tests {
             sector_macro: "unknown".into(),
             trade_offers: vec![],
             display_name_ref: None,
+            production_module_macro: None,
         }];
         let sm: HashMap<String, SectorId> = HashMap::new();
         let mut fs = HashMap::new();
@@ -143,6 +150,7 @@ mod tests {
             sector_macro: "anything".into(),
             trade_offers: vec![],
             display_name_ref: None,
+            production_module_macro: None,
         }];
         let mut fs = HashMap::new();
         let mut next = 1u32;
@@ -170,6 +178,7 @@ mod tests {
                 desired: 1200,
             }],
             display_name_ref: None,
+            production_module_macro: None,
         }];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
         sm.insert("sa".into(), SectorId(1));
@@ -180,6 +189,32 @@ mod tests {
         assert_eq!(offers.len(), 1);
         assert_eq!(offers[0].ware_id, "energycells");
         assert_eq!(offers[0].direction, TradeDirection::Buy);
+    }
+
+    #[test]
+    fn production_module_propagated_to_world() {
+        let records = vec![EntityRecord {
+            id: 0x77,
+            parent_id: None,
+            macro_name: "station_gen_factory_base_01_macro".into(),
+            code: None,
+            kind: LiveObjectKind::Station,
+            owner: Some("freesplit".into()),
+            position: glam::Vec3::ZERO,
+            sector_macro: "sa".into(),
+            trade_offers: vec![],
+            display_name_ref: None,
+            production_module_macro: Some("prod_gen_microchips_macro".into()),
+        }];
+        let mut sm: HashMap<String, SectorId> = HashMap::new();
+        sm.insert("sa".into(), SectorId(1));
+        let mut fs: HashMap<String, FactionId> = HashMap::new();
+        let mut next = 1u32;
+        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        assert_eq!(
+            world.production_modules.get(&0x77).map(String::as_str),
+            Some("prod_gen_microchips_macro")
+        );
     }
 
     #[test]
@@ -195,6 +230,7 @@ mod tests {
             sector_macro: "sa".into(),
             trade_offers: vec![],
             display_name_ref: Some("{20101,122701}".into()),
+            production_module_macro: None,
         }];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
         sm.insert("sa".into(), SectorId(1));

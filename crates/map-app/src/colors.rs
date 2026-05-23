@@ -47,6 +47,16 @@ fn resolve_class_name(
     eid: map_domain::world::EntityId,
     macro_name: &str,
 ) -> Option<String> {
+    // Stations: prefer the production module's identification (e.g.
+    // "Microchip Production") over the generic basename ("Factory").
+    if let Some(prod_macro) = world.production_modules.get(&eid) {
+        if let Some(prod_ref) = universe.macro_identifications.get(prod_macro) {
+            let display = x4_display_name(prod_ref, &universe.translations);
+            if !display.is_empty() && !display.starts_with('{') {
+                return Some(display);
+            }
+        }
+    }
     if let Some(raw) = world.display_name_refs.get(&eid) {
         let display = x4_display_name(raw, &universe.translations);
         if !display.is_empty() && !display.starts_with('{') {
@@ -302,6 +312,35 @@ mod tests {
             resolve_entity_label(&w, &u, 1),
             "Cerberus Vanguard (AKV-484)"
         );
+    }
+
+    #[test]
+    fn resolve_entity_label_uses_production_module_for_factory() {
+        let mut u = sample_universe();
+        // Production module identification.
+        u.translations.insert((20104, 11901), "Microchip Production".into());
+        u.macro_identifications.insert(
+            "prod_gen_microchips_macro".into(),
+            "{20104,11901}".into(),
+        );
+        // Generic factory basename.
+        u.translations.insert((20102, 1701), "Factory".into());
+        let mut w = sample_world();
+        // Entity 7: station with basename + production module.
+        w.insert_entity(
+            7,
+            "station_gen_factory_base_01_macro".into(),
+            LiveObjectKind::Station,
+            None,
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            Some("FAC-001".into()),
+        );
+        w.display_name_refs.insert(7, "{20102,1701}".into());
+        w.production_modules
+            .insert(7, "prod_gen_microchips_macro".into());
+        assert_eq!(resolve_entity_label(&w, &u, 7), "Microchip Production (FAC-001)");
     }
 
     #[test]
