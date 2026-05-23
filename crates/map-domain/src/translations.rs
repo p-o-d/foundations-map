@@ -69,7 +69,7 @@ fn substitute_refs(
                         let inner = &after_open[..close_rel];
                         let parsed: Option<(u32, u32)> = inner
                             .split_once(',')
-                            .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
+                            .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
                         match parsed.and_then(|(p, t)| translations.get(&(p, t))) {
                             Some(referenced) => {
                                 let resolved = x4_display_name_inner(referenced, translations, depth + 1);
@@ -322,5 +322,17 @@ mod tests {
         let t = HashMap::new();
         assert_eq!(x4_display_name("{not,a,ref}", &t), "{not,a,ref}");
         assert_eq!(x4_display_name("{", &t), "{");
+    }
+
+    #[test]
+    fn whitespace_around_comma_in_ref_tolerated() {
+        // X4 macro files often format identification refs with a space after
+        // the comma (e.g. `{20101, 21603}`) while save files use the compact
+        // form (`{20101,21603}`). Both must resolve.
+        let mut t = HashMap::new();
+        t.insert((20101, 21603), "Buzzard".into());
+        assert_eq!(x4_display_name("{20101, 21603}", &t), "Buzzard");
+        assert_eq!(x4_display_name("{20101,21603}", &t), "Buzzard");
+        assert_eq!(x4_display_name("{ 20101 , 21603 }", &t), "Buzzard");
     }
 }
