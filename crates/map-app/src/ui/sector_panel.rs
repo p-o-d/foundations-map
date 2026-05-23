@@ -126,7 +126,8 @@ impl SectorPanel {
                                     .show(ui, |ui| {
                                         for &eid in eids {
                                             let is_sel = *selected_entity == Some(eid);
-                                            let (label, icon) = entity_row_label(world, universe, eid);
+                                            let (label, icon) =
+                                                entity_row_label(world, universe, eid);
                                             let color = if is_sel {
                                                 theme::ACCENT
                                             } else {
@@ -205,7 +206,8 @@ impl SectorPanel {
                                     .default_open(true)
                                     .show(ui, |ui| {
                                         for &cid in kids {
-                                            let (clabel, cicon) = entity_row_label(world, universe, cid);
+                                            let (clabel, cicon) =
+                                                entity_row_label(world, universe, cid);
                                             if ui
                                                 .colored_label(
                                                     theme::TEXT_PRIMARY,

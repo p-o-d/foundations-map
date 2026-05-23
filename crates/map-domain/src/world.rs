@@ -253,8 +253,14 @@ mod tests {
         let mut w = World::new();
         w.display_name_refs.insert(0x10, "{20101,122701}".into());
         w.display_name_refs.insert(0x11, "My Best Ship".into());
-        assert_eq!(w.display_name_refs.get(&0x10).map(String::as_str), Some("{20101,122701}"));
-        assert_eq!(w.display_name_refs.get(&0x11).map(String::as_str), Some("My Best Ship"));
+        assert_eq!(
+            w.display_name_refs.get(&0x10).map(String::as_str),
+            Some("{20101,122701}")
+        );
+        assert_eq!(
+            w.display_name_refs.get(&0x11).map(String::as_str),
+            Some("My Best Ship")
+        );
         assert!(w.display_name_refs.get(&0x99).is_none());
     }
 

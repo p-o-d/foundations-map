@@ -411,14 +411,23 @@ mod tests {
         assert_eq!(ship_l.display_name_ref.as_deref(), Some("{20101,122701}"));
 
         let station_basename = out.iter().find(|r| r.id == 0x20).unwrap();
-        assert_eq!(station_basename.display_name_ref.as_deref(), Some("{20102,1701}"));
+        assert_eq!(
+            station_basename.display_name_ref.as_deref(),
+            Some("{20102,1701}")
+        );
 
         // When both name= and basename= are present, name= wins.
         let station_named = out.iter().find(|r| r.id == 0x21).unwrap();
-        assert_eq!(station_named.display_name_ref.as_deref(), Some("{20103,2001}"));
+        assert_eq!(
+            station_named.display_name_ref.as_deref(),
+            Some("{20103,2001}")
+        );
 
         let renamed_ship = out.iter().find(|r| r.id == 0x30).unwrap();
-        assert_eq!(renamed_ship.display_name_ref.as_deref(), Some("My Best Ship"));
+        assert_eq!(
+            renamed_ship.display_name_ref.as_deref(),
+            Some("My Best Ship")
+        );
 
         let pod = out.iter().find(|r| r.id == 0x40).unwrap();
         assert_eq!(pod.display_name_ref, None);

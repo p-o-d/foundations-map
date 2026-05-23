@@ -53,7 +53,10 @@ fn resolve_class_name(
             return Some(display);
         }
     }
-    if let Some(macro_ref) = universe.macro_identifications.get(&macro_name.to_lowercase()) {
+    if let Some(macro_ref) = universe
+        .macro_identifications
+        .get(&macro_name.to_lowercase())
+    {
         let display = x4_display_name(macro_ref, &universe.translations);
         if !display.is_empty() && !display.starts_with('{') {
             return Some(display);
@@ -81,14 +84,18 @@ pub fn resolve_entity_label(
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
     let class_name = resolve_class_name(world, universe, eid, &macro_name).or_else(|| {
         let stripped = strip_macro(&macro_name);
-        if stripped.is_empty() { None } else { Some(stripped) }
+        if stripped.is_empty() {
+            None
+        } else {
+            Some(stripped)
+        }
     });
     let code = world.codes.get(&eid).cloned();
     match (class_name, code) {
         (Some(c), Some(code)) => format!("{c} ({code})"),
-        (Some(c), None)       => c,
-        (None, Some(code))    => code,
-        (None, None)          => macro_name,
+        (Some(c), None) => c,
+        (None, Some(code)) => code,
+        (None, None) => macro_name,
     }
 }
 
@@ -105,7 +112,11 @@ pub fn resolve_entity_label_without_code(
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
     resolve_class_name(world, universe, eid, &macro_name).unwrap_or_else(|| {
         let stripped = strip_macro(&macro_name);
-        if stripped.is_empty() { macro_name } else { stripped }
+        if stripped.is_empty() {
+            macro_name
+        } else {
+            stripped
+        }
     })
 }
 
@@ -131,8 +142,10 @@ mod tests {
         // Add additional translations for the macro-identification test cases.
         u.translations.insert((20101, 30801), "Helios".into());
         u.translations.insert((20111, 5462), "E".into());
-        u.translations
-            .insert((20101, 30804), "(Helios E){20101,30801} {20111,5462}".into());
+        u.translations.insert(
+            (20101, 30804),
+            "(Helios E){20101,30801} {20111,5462}".into(),
+        );
         u.current_locale = 44;
         // Map "ship_par_l_trans_container_03_a_macro" to its identification ref.
         u.macro_identifications.insert(
@@ -146,39 +159,64 @@ mod tests {
         let mut w = World::new();
         // Entity 1: has both a display_name_ref and a code.
         w.insert_entity(
-            1, "ship_par_l_trans_container_03_a_macro".into(),
-            LiveObjectKind::ShipLarge, Some(FactionId(1)),
-            glam::Vec3::ZERO, SectorId(1), None, Some("AKV-484".into()),
+            1,
+            "ship_par_l_trans_container_03_a_macro".into(),
+            LiveObjectKind::ShipLarge,
+            Some(FactionId(1)),
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            Some("AKV-484".into()),
         );
         w.display_name_refs.insert(1, "{20101,122701}".into());
 
         // Entity 2: literal name + code (player-renamed ship).
         w.insert_entity(
-            2, "ship_arg_s_scout_01_a_macro".into(),
-            LiveObjectKind::ShipSmall, None, glam::Vec3::ZERO,
-            SectorId(1), None, Some("MBS-001".into()),
+            2,
+            "ship_arg_s_scout_01_a_macro".into(),
+            LiveObjectKind::ShipSmall,
+            None,
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            Some("MBS-001".into()),
         );
         w.display_name_refs.insert(2, "My Best Ship".into());
 
         // Entity 3: no display_name_ref, no code — pure macro fallback.
         w.insert_entity(
-            3, "ship_xen_n_fighter_01_a_macro".into(),
-            LiveObjectKind::ShipSmall, None, glam::Vec3::ZERO,
-            SectorId(1), None, None,
+            3,
+            "ship_xen_n_fighter_01_a_macro".into(),
+            LiveObjectKind::ShipSmall,
+            None,
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            None,
         );
         // Entity 4: has display_name_ref, no code.
         w.insert_entity(
-            4, "ship_xen_p_destroyer_01_a_macro".into(),
-            LiveObjectKind::ShipLarge, None, glam::Vec3::ZERO,
-            SectorId(1), None, None,
+            4,
+            "ship_xen_p_destroyer_01_a_macro".into(),
+            LiveObjectKind::ShipLarge,
+            None,
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            None,
         );
         w.display_name_refs.insert(4, "{20101,122701}".into());
 
         // Entity 5: no display_name_ref, but macro is in macro_identifications.
         w.insert_entity(
-            5, "ship_par_l_trans_container_03_a_macro".into(),
-            LiveObjectKind::ShipLarge, None, glam::Vec3::ZERO,
-            SectorId(1), None, Some("AKV-484".into()),
+            5,
+            "ship_par_l_trans_container_03_a_macro".into(),
+            LiveObjectKind::ShipLarge,
+            None,
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            Some("AKV-484".into()),
         );
 
         w
@@ -188,7 +226,10 @@ mod tests {
     fn resolve_entity_label_name_and_code() {
         let u = sample_universe();
         let w = sample_world();
-        assert_eq!(resolve_entity_label(&w, &u, 1), "Cerberus Vanguard (AKV-484)");
+        assert_eq!(
+            resolve_entity_label(&w, &u, 1),
+            "Cerberus Vanguard (AKV-484)"
+        );
     }
 
     #[test]
@@ -223,9 +264,15 @@ mod tests {
     fn resolve_entity_label_without_code_omits_code() {
         let u = sample_universe();
         let w = sample_world();
-        assert_eq!(resolve_entity_label_without_code(&w, &u, 1), "Cerberus Vanguard");
+        assert_eq!(
+            resolve_entity_label_without_code(&w, &u, 1),
+            "Cerberus Vanguard"
+        );
         assert_eq!(resolve_entity_label_without_code(&w, &u, 2), "My Best Ship");
-        assert_eq!(resolve_entity_label_without_code(&w, &u, 3), "ship xen n fighter 01 a");
+        assert_eq!(
+            resolve_entity_label_without_code(&w, &u, 3),
+            "ship xen n fighter 01 a"
+        );
     }
 
     #[test]
@@ -251,7 +298,10 @@ mod tests {
         // → extract → "Cerberus Vanguard (AKV-484)".
         // It does NOT fall through to macro_identifications because the save
         // attribute resolved successfully.
-        assert_eq!(resolve_entity_label(&w, &u, 1), "Cerberus Vanguard (AKV-484)");
+        assert_eq!(
+            resolve_entity_label(&w, &u, 1),
+            "Cerberus Vanguard (AKV-484)"
+        );
     }
 
     #[test]
@@ -261,12 +311,16 @@ mod tests {
         let mut w = sample_world();
         // Add entity 6 whose save name= is itself a compound ref.
         w.insert_entity(
-            6, "ship_test".into(),
-            LiveObjectKind::ShipLarge, None, glam::Vec3::ZERO,
-            SectorId(1), None, Some("XYZ-1".into()),
+            6,
+            "ship_test".into(),
+            LiveObjectKind::ShipLarge,
+            None,
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            Some("XYZ-1".into()),
         );
         w.display_name_refs.insert(6, "{20101,30804}".into());
         assert_eq!(resolve_entity_label(&w, &u, 6), "Helios E (XYZ-1)");
     }
-
 }

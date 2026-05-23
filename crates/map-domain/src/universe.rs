@@ -199,10 +199,14 @@ mod tests {
     #[test]
     fn universe_translations_and_locale_fields() {
         let mut u = Universe::default();
-        u.translations.insert((20101, 122701), "Cerberus Vanguard".into());
+        u.translations
+            .insert((20101, 122701), "Cerberus Vanguard".into());
         u.available_locales = vec![44, 49, 33];
         u.current_locale = 44;
-        assert_eq!(u.translations.get(&(20101, 122701)).map(String::as_str), Some("Cerberus Vanguard"));
+        assert_eq!(
+            u.translations.get(&(20101, 122701)).map(String::as_str),
+            Some("Cerberus Vanguard")
+        );
         assert_eq!(u.available_locales, vec![44, 49, 33]);
         assert_eq!(u.current_locale, 44);
     }
@@ -210,10 +214,14 @@ mod tests {
     #[test]
     fn macro_identifications_round_trip() {
         let mut u = Universe::default();
-        u.macro_identifications
-            .insert("ship_par_l_trans_container_03_a_macro".into(), "{20101,30804}".into());
+        u.macro_identifications.insert(
+            "ship_par_l_trans_container_03_a_macro".into(),
+            "{20101,30804}".into(),
+        );
         assert_eq!(
-            u.macro_identifications.get("ship_par_l_trans_container_03_a_macro").map(String::as_str),
+            u.macro_identifications
+                .get("ship_par_l_trans_container_03_a_macro")
+                .map(String::as_str),
             Some("{20101,30804}")
         );
         assert!(u.macro_identifications.get("missing").is_none());

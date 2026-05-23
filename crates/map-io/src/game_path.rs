@@ -223,23 +223,23 @@ pub fn list_available_locales(game_dir: &Path) -> Vec<u32> {
 /// Unknown IDs render as `l<NNN>` so the user can at least identify the file.
 pub fn locale_display_name(id: u32) -> &'static str {
     match id {
-        7   => "Русский",
-        33  => "Français",
-        34  => "Español",
-        39  => "Italiano",
-        42  => "Čeština",
-        44  => "English",
-        48  => "Polski",
-        49  => "Deutsch",
-        55  => "Português (Brasil)",
-        81  => "日本語",
-        82  => "한국어",
-        86  => "中文(简体)",
-        88  => "中文(繁體)",
-        90  => "Türkçe",
+        7 => "Русский",
+        33 => "Français",
+        34 => "Español",
+        39 => "Italiano",
+        42 => "Čeština",
+        44 => "English",
+        48 => "Polski",
+        49 => "Deutsch",
+        55 => "Português (Brasil)",
+        81 => "日本語",
+        82 => "한국어",
+        86 => "中文(简体)",
+        88 => "中文(繁體)",
+        90 => "Türkçe",
         359 => "Български",
         380 => "Українська",
-        _   => locale_unknown_label(id),
+        _ => locale_unknown_label(id),
     }
 }
 
@@ -247,8 +247,8 @@ fn locale_unknown_label(id: u32) -> &'static str {
     // Keep a tiny static cache for unknown ids encountered at runtime so we can
     // hand out &'static str. Worst-case grows by the number of DLC-shipped
     // locales we don't recognise (currently zero).
-    use std::sync::OnceLock;
     use std::sync::Mutex;
+    use std::sync::OnceLock;
     static CACHE: OnceLock<Mutex<std::collections::HashMap<u32, &'static str>>> = OnceLock::new();
     let map = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
     let mut guard = map.lock().unwrap();
@@ -293,7 +293,7 @@ mod tests {
     fn locale_display_name_known_ids() {
         assert_eq!(locale_display_name(44), "English");
         assert_eq!(locale_display_name(49), "Deutsch");
-        assert_eq!(locale_display_name(7),  "Русский");
+        assert_eq!(locale_display_name(7), "Русский");
         assert_eq!(locale_display_name(86), "中文(简体)");
         assert_eq!(locale_display_name(380), "Українська");
     }

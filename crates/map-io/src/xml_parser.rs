@@ -117,7 +117,8 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     // definition file and extract `<identification name="{p,t}"/>`. Used as a
     // fallback when a save entity lacks a per-instance name=/basename= attr.
     // First-match-wins across main + DLC archives (matches mapdefaults pattern).
-    let mut macro_index: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut macro_index: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for data in crate::cat_reader::read_all_game_files(game_dir, "index/macros.xml") {
         for (k, v) in crate::macro_index::parse_macros_index(&data) {
             macro_index.entry(k).or_insert(v);
@@ -142,7 +143,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
             macro_identifications.insert(macro_name.clone(), ref_str);
         }
     }
-    eprintln!("[map] Macro identifications: {}", macro_identifications.len());
+    eprintln!(
+        "[map] Macro identifications: {}",
+        macro_identifications.len()
+    );
 
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
     let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
@@ -219,7 +223,9 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
                 .map(|raw| resolve_display_name(raw, &translations))
                 .or_else(|| {
                     let (pid, tid) = derive_sector_text_id(sector_macro)?;
-                    translations.get(&(pid, tid)).map(|raw| resolve_display_name(raw, &translations))
+                    translations
+                        .get(&(pid, tid))
+                        .map(|raw| resolve_display_name(raw, &translations))
                 })
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| macro_to_display_name(sector_macro));
@@ -519,7 +525,8 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         let def = &faction_defs[faction_id_str];
         let fid = map_domain::ids::FactionId(next_id);
         next_id += 1;
-        let display_name = universe.translations
+        let display_name = universe
+            .translations
             .get(&def.name_textref)
             .cloned()
             .unwrap_or_else(|| faction_id_str.clone());
@@ -1455,10 +1462,7 @@ fn macro_to_display_name(s: &str) -> String {
 /// Delegates to `x4_display_name` which handles ref substitution (recursive),
 /// leading-paren display extraction, trailing-paren hint stripping, and
 /// backslash-paren unescaping in one unified pass.
-fn resolve_display_name(
-    raw: &str,
-    translations: &HashMap<(u32, u32), String>,
-) -> String {
+fn resolve_display_name(raw: &str, translations: &HashMap<(u32, u32), String>) -> String {
     map_domain::translations::x4_display_name(raw, translations)
 }
 
@@ -1950,7 +1954,13 @@ mod tests {
             map.get(&(20004, 10011)).map(String::as_str),
             Some("{20004,10012} {20004,10013}(Argon Prime)")
         );
-        assert_eq!(map.get(&(20101, 122701)).map(String::as_str), Some("Cerberus Vanguard"));
-        assert_eq!(map.get(&(10000, 500)).map(String::as_str), Some("Some Lore Snippet"));
+        assert_eq!(
+            map.get(&(20101, 122701)).map(String::as_str),
+            Some("Cerberus Vanguard")
+        );
+        assert_eq!(
+            map.get(&(10000, 500)).map(String::as_str),
+            Some("Some Lore Snippet")
+        );
     }
 }

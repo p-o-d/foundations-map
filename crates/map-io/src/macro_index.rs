@@ -18,9 +18,7 @@ pub fn parse_macros_index(xml: &[u8]) -> HashMap<String, String> {
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e))
-                if e.name().as_ref() == b"entry" =>
-            {
+            Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) if e.name().as_ref() == b"entry" => {
                 let mut name: Option<String> = None;
                 let mut value: Option<String> = None;
                 for attr in e.attributes().flatten() {
@@ -84,15 +82,20 @@ mod tests {
 </index>"#;
         let m = parse_macros_index(xml);
         assert_eq!(
-            m.get("station_gen_factory_base_01_macro").map(String::as_str),
+            m.get("station_gen_factory_base_01_macro")
+                .map(String::as_str),
             Some("assets/structures/macros/station_gen_factory_base_01_macro.xml")
         );
         assert_eq!(
-            m.get("ship_par_l_trans_container_03_a_macro").map(String::as_str),
+            m.get("ship_par_l_trans_container_03_a_macro")
+                .map(String::as_str),
             Some("assets/units/size_l/macros/ship_par_l_trans_container_03_a_macro.xml")
         );
         // Key is lowercased.
-        assert_eq!(m.get("mixed_case_macro").map(String::as_str), Some("assets/foo.xml"));
+        assert_eq!(
+            m.get("mixed_case_macro").map(String::as_str),
+            Some("assets/foo.xml")
+        );
         // Original case not present.
         assert!(m.get("MIXED_Case_Macro").is_none());
     }

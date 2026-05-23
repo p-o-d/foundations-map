@@ -44,11 +44,7 @@ fn x4_display_name_inner(
 
 /// Substitute each `{page,id}` substring with the recursive display of the
 /// referenced entry. Unknown refs and malformed brace groups stay verbatim.
-fn substitute_refs(
-    s: &str,
-    translations: &HashMap<(u32, u32), String>,
-    depth: u32,
-) -> String {
+fn substitute_refs(s: &str, translations: &HashMap<(u32, u32), String>, depth: u32) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while !rest.is_empty() {
@@ -67,12 +63,14 @@ fn substitute_refs(
                     }
                     Some(close_rel) => {
                         let inner = &after_open[..close_rel];
-                        let parsed: Option<(u32, u32)> = inner
-                            .split_once(',')
-                            .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
+                        let parsed: Option<(u32, u32)> =
+                            inner.split_once(',').and_then(|(a, b)| {
+                                Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+                            });
                         match parsed.and_then(|(p, t)| translations.get(&(p, t))) {
                             Some(referenced) => {
-                                let resolved = x4_display_name_inner(referenced, translations, depth + 1);
+                                let resolved =
+                                    x4_display_name_inner(referenced, translations, depth + 1);
                                 out.push_str(&resolved);
                             }
                             None => {
@@ -186,7 +184,10 @@ mod tests {
         // Variant with leading paren.
         m.insert((20101, 30801), "Helios".into());
         m.insert((20111, 5462), "E".into());
-        m.insert((20101, 30804), "(Helios E){20101,30801} {20111,5462}".into());
+        m.insert(
+            (20101, 30804),
+            "(Helios E){20101,30801} {20111,5462}".into(),
+        );
         // Variant with escaped parens.
         m.insert((20101, 10801), "Drill".into());
         m.insert((20111, 3101), "(Mineral)".into());
@@ -205,7 +206,10 @@ mod tests {
         // Cluster page entry with composite ref + paren hint.
         m.insert((20003, 10001), "{20005,6002}(Большая биржа)".into());
         // Sector page entries with cluster ref + numeral ref + paren hint.
-        m.insert((20004, 10011), "{20003,10001} {20402,1}(Большая Биржа I)".into());
+        m.insert(
+            (20004, 10011),
+            "{20003,10001} {20402,1}(Большая Биржа I)".into(),
+        );
         // Cluster page entry that ONLY uses ref substitution (paren is translator-only).
         m.insert((20003, 7250001), "{20005,6055}(Void of Opportunity)".into());
         m
@@ -291,10 +295,7 @@ mod tests {
     fn cluster_entry_via_ref_extracts_correctly() {
         let t = sector_translations();
         // Lookup of cluster 10001 directly.
-        assert_eq!(
-            x4_display_name("{20003,10001}", &t),
-            "Большая биржа"
-        );
+        assert_eq!(x4_display_name("{20003,10001}", &t), "Большая биржа");
     }
 
     #[test]
@@ -302,10 +303,7 @@ mod tests {
         let mut t = HashMap::new();
         t.insert((20101, 1), "Foo".into());
         // {99999,1} stays verbatim; visible for debugging.
-        assert_eq!(
-            x4_display_name("{20101,1} {99999,1}", &t),
-            "Foo {99999,1}"
-        );
+        assert_eq!(x4_display_name("{20101,1} {99999,1}", &t), "Foo {99999,1}");
     }
 
     #[test]
