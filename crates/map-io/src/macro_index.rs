@@ -31,9 +31,15 @@ pub fn parse_macros_index(xml: &[u8]) -> HashMap<String, String> {
                                 .map(|s| s.to_lowercase());
                         }
                         b"value" => {
-                            value = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .map(|s| format!("{}.xml", s.replace('\\', "/")));
+                            value = std::str::from_utf8(&attr.value).ok().map(|s| {
+                                let slashed = s.replace('\\', "/");
+                                // DLC entries prefix the path with
+                                // `extensions/<dlc_name>/`, but the file inside
+                                // the DLC's cat archive is stored without that
+                                // prefix. Strip it so cat lookup finds the file.
+                                let stripped = strip_extensions_dlc_prefix(&slashed);
+                                format!("{stripped}.xml")
+                            });
                         }
                         _ => {}
                     }
@@ -49,6 +55,19 @@ pub fn parse_macros_index(xml: &[u8]) -> HashMap<String, String> {
         buf.clear();
     }
     out
+}
+
+/// Strip a leading `extensions/<dlc_name>/` segment from `path` if present.
+/// DLC `index/macros.xml` entries qualify their `value` paths with this
+/// prefix, but the files inside the DLC cat archive are stored without it.
+fn strip_extensions_dlc_prefix(path: &str) -> &str {
+    let Some(rest) = path.strip_prefix("extensions/") else {
+        return path;
+    };
+    match rest.find('/') {
+        Some(next_slash) => &rest[next_slash + 1..],
+        None => path,
+    }
 }
 
 #[cfg(test)]
@@ -76,6 +95,32 @@ mod tests {
         assert_eq!(m.get("mixed_case_macro").map(String::as_str), Some("assets/foo.xml"));
         // Original case not present.
         assert!(m.get("MIXED_Case_Macro").is_none());
+    }
+
+    #[test]
+    fn strips_extensions_dlc_prefix_so_cat_lookup_works() {
+        let xml = br#"<index>
+  <entry name="ship_spl_s_scout_01_a_macro" value="extensions\ego_dlc_split\assets\units\size_s\macros\ship_spl_s_scout_01_a_macro" />
+  <entry name="ship_arg_l_destroyer_01_a_macro" value="assets\units\size_l\macros\ship_arg_l_destroyer_01_a_macro" />
+  <entry name="weirdly_namespaced_macro" value="extensions\ego_dlc_terran\some\other\path" />
+</index>"#;
+        let m = parse_macros_index(xml);
+        // DLC entry: prefix `extensions/ego_dlc_split/` stripped so the
+        // resulting path matches what the DLC's cat archive lists.
+        assert_eq!(
+            m.get("ship_spl_s_scout_01_a_macro").map(String::as_str),
+            Some("assets/units/size_s/macros/ship_spl_s_scout_01_a_macro.xml")
+        );
+        // Main entry untouched.
+        assert_eq!(
+            m.get("ship_arg_l_destroyer_01_a_macro").map(String::as_str),
+            Some("assets/units/size_l/macros/ship_arg_l_destroyer_01_a_macro.xml")
+        );
+        // Terran example also gets its prefix stripped.
+        assert_eq!(
+            m.get("weirdly_namespaced_macro").map(String::as_str),
+            Some("some/other/path.xml")
+        );
     }
 
     #[test]
