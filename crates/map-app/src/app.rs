@@ -142,13 +142,26 @@ impl eframe::App for App {
         }
 
         let mut refresh_clicked = false;
+        let mut locale_change: Option<u32> = None;
         egui::Panel::top("top_bar")
             .exact_size(36.0)
             .show_inside(ui, |ui| {
                 let meta = self.snapshot.as_ref().map(|(m, _)| m);
-                let resp = self.top_bar.show(ui, meta, self.snapshot_loading);
+                let resp = self.top_bar.show(
+                    ui,
+                    meta,
+                    self.snapshot_loading,
+                    &self.universe.available_locales,
+                    self.settings.locale,
+                );
                 refresh_clicked = resp.refresh_clicked;
+                locale_change = resp.locale_changed_to;
             });
+        if let Some(new_locale) = locale_change {
+            if let Some(game_dir) = map_io::game_path::detect() {
+                self.reload_galaxy(new_locale, &game_dir);
+            }
+        }
 
         // Keep the snapshot-age label fresh without burning CPU: tick at most
         // every 30s. Real state changes (watcher, refresh button) still cause

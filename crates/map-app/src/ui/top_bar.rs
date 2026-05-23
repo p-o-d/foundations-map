@@ -15,6 +15,9 @@ impl Default for TopBar {
 #[derive(Default)]
 pub struct TopBarResponse {
     pub refresh_clicked: bool,
+    /// `Some(new_locale_id)` when the user picked a different locale in the
+    /// dropdown this frame; `None` otherwise.
+    pub locale_changed_to: Option<u32>,
 }
 
 impl TopBar {
@@ -23,6 +26,8 @@ impl TopBar {
         ui: &mut egui::Ui,
         snapshot: Option<&SnapshotMeta>,
         loading: bool,
+        available_locales: &[u32],
+        current_locale: u32,
     ) -> TopBarResponse {
         let mut resp = TopBarResponse::default();
         ui.horizontal(|ui| {
@@ -41,6 +46,24 @@ impl TopBar {
                 .clicked()
             {
                 resp.refresh_clicked = true;
+            }
+
+            ui.add_space(8.0);
+            // Locale dropdown — disabled while loading so we don't trigger a
+            // reload mid-parse.
+            let mut chosen = current_locale;
+            ui.add_enabled_ui(!loading, |ui| {
+                egui::ComboBox::from_id_salt("locale-dropdown")
+                    .selected_text(map_io::game_path::locale_display_name(current_locale))
+                    .show_ui(ui, |ui| {
+                        for &id in available_locales {
+                            let label = map_io::game_path::locale_display_name(id);
+                            ui.selectable_value(&mut chosen, id, label);
+                        }
+                    });
+            });
+            if chosen != current_locale {
+                resp.locale_changed_to = Some(chosen);
             }
 
             ui.add_space(16.0);
