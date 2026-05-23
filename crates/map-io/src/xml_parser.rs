@@ -210,11 +210,12 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
             let name = name_refs
                 .get(&sector_macro.to_lowercase())
                 .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))
-                .cloned()
+                .map(|raw| resolve_display_name(raw, &translations))
                 .or_else(|| {
                     let (pid, tid) = derive_sector_text_id(sector_macro)?;
-                    translations.get(&(pid, tid)).cloned()
+                    translations.get(&(pid, tid)).map(|raw| resolve_display_name(raw, &translations))
                 })
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| macro_to_display_name(sector_macro));
 
             id_counter += 1;
@@ -244,7 +245,8 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         let name = name_refs
             .get(&cluster_macro.to_lowercase())
             .and_then(|(pid, tid)| translations.get(&(*pid, *tid)))
-            .cloned()
+            .map(|raw| resolve_display_name(raw, &translations))
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| macro_to_display_name(cluster_macro));
         let cluster_id = cluster_macro_to_id[cluster_macro];
         clusters.push(Cluster {
@@ -1441,6 +1443,18 @@ fn derive_sector_text_id(macro_name: &str) -> Option<(u32, u32)> {
 /// Fallback: convert `Cluster_01_Sector001_macro` → `"Cluster 01 Sector001"`.
 fn macro_to_display_name(s: &str) -> String {
     s.trim_end_matches("_macro").replace('_', " ")
+}
+
+/// Resolve a translation lookup into a clean display name. Applies
+/// `replace_translation_refs` recursively (so composite cluster/sector entries
+/// like `{20005,6002}(Grand Exchange)` substitute the real translated name)
+/// then `extract_x4_display_name` to strip translator hints / descriptions.
+fn resolve_display_name(
+    raw: &str,
+    translations: &HashMap<(u32, u32), String>,
+) -> String {
+    let resolved = map_domain::translations::replace_translation_refs(raw, translations);
+    map_domain::translations::extract_x4_display_name(&resolved)
 }
 
 /// Parse a combined single-file galaxy XML (fixture format used in tests).
