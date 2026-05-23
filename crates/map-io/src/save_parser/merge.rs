@@ -37,6 +37,7 @@ pub fn merge(
             });
             let entity_id = r.id;
             let trade_offers = r.trade_offers;
+            let display_name_ref = r.display_name_ref;
             world.insert_entity(
                 entity_id,
                 r.macro_name,
@@ -49,6 +50,9 @@ pub fn merge(
             );
             if !trade_offers.is_empty() {
                 world.trade_offers.insert(entity_id, trade_offers);
+            }
+            if let Some(name_ref) = display_name_ref {
+                world.display_name_refs.insert(entity_id, name_ref);
             }
         }
     }
@@ -176,5 +180,30 @@ mod tests {
         assert_eq!(offers.len(), 1);
         assert_eq!(offers[0].ware_id, "energycells");
         assert_eq!(offers[0].direction, TradeDirection::Buy);
+    }
+
+    #[test]
+    fn display_name_refs_propagated_to_world() {
+        let records = vec![EntityRecord {
+            id: 0x55,
+            parent_id: None,
+            macro_name: "ship_par_l_trans_container_03_a_macro".into(),
+            code: Some("AKV-484".into()),
+            kind: LiveObjectKind::ShipLarge,
+            owner: Some("alliance".into()),
+            position: glam::Vec3::ZERO,
+            sector_macro: "sa".into(),
+            trade_offers: vec![],
+            display_name_ref: Some("{20101,122701}".into()),
+        }];
+        let mut sm: HashMap<String, SectorId> = HashMap::new();
+        sm.insert("sa".into(), SectorId(1));
+        let mut fs: HashMap<String, FactionId> = HashMap::new();
+        let mut next = 1u32;
+        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        assert_eq!(
+            world.display_name_refs.get(&0x55).map(String::as_str),
+            Some("{20101,122701}")
+        );
     }
 }
