@@ -99,6 +99,19 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
     }
     let translations = parse_translations_xml(&translations_str)?;
 
+    // Ware id → display name (e.g. "energycells" → "Energy Cells"). Non-fatal:
+    // missing or unparseable wares.xml leaves `ware_names` empty, UI falls back
+    // to raw ids. Multi-archive read for DLC extensions; first occurrence wins
+    // (same convention as factions / colors).
+    let mut ware_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/wares.xml") {
+        for (k, v) in parse_ware_names_xml(&data, &translations) {
+            ware_names.entry(k).or_insert(v);
+        }
+    }
+    eprintln!("[map] Ware names: {}", ware_names.len());
+
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
     let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
         std::collections::HashMap::new();
@@ -456,6 +469,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path) -> Result<Universe, ParseError> {
         sector_macros,
         faction_strings: HashMap::new(),
         faction_table: HashMap::new(),
+        ware_names,
     };
 
     // Assign sequential FactionIds and populate the faction table.
@@ -711,8 +725,10 @@ fn parse_sector_name_refs_xml(xml: &str) -> Result<HashMap<String, (u32, u32)>, 
 
 /// Translation file: (page_id, text_id) → display name string.
 ///
-/// Reads entries in page 20004 (sector names).  Each `<t id="N">` value has the
-/// form `{ref1} {ref2}(Sector Name)` — the last parenthetical is the display name.
+/// Reads entries in pages 20003 (cluster names), 20004 (sector names), and
+/// 20201 (ware names). Sector/cluster entries have the form
+/// `{ref1} {ref2}(Display Name)` — the last parenthetical is taken. Ware
+/// entries are plain text (`Energy Cells`) and are kept as-is.
 fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, ParseError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -731,8 +747,8 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     current_page = attr_value(e, b"id").and_then(|s| s.parse().ok());
                 }
                 b"t" => {
-                    // 20003 = cluster names, 20004 = sector names
-                    if matches!(current_page, Some(20003 | 20004)) {
+                    // 20003 = cluster names, 20004 = sector names, 20201 = ware names
+                    if matches!(current_page, Some(20003 | 20004 | 20201)) {
                         current_text_id = attr_value(e, b"id").and_then(|s| s.parse().ok());
                     }
                 }
@@ -744,7 +760,15 @@ fn parse_translations_xml(xml: &str) -> Result<HashMap<(u32, u32), String>, Pars
                     let decoded = e.decode().unwrap_or_default();
                     let content =
                         quick_xml::escape::unescape(&decoded).unwrap_or_else(|_| decoded.clone());
-                    if let Some(name) = extract_last_parenthetical(&content) {
+                    // 20003/20004: parenthetical extraction (sector/cluster names).
+                    // 20201: plain text (ware names have no parenthetical).
+                    let name = if page_id == 20201 {
+                        let t = content.trim().to_string();
+                        if t.is_empty() { None } else { Some(t) }
+                    } else {
+                        extract_last_parenthetical(&content)
+                    };
+                    if let Some(name) = name {
                         translations.insert((page_id, text_id), name);
                     }
                     current_text_id = None;
@@ -1620,6 +1644,7 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         sector_macros: HashMap::new(),
         faction_strings: HashMap::new(),
         faction_table: HashMap::new(),
+        ware_names: HashMap::new(),
     })
 }
 
@@ -1750,4 +1775,100 @@ pub fn parse_sector_objects(path: &Path) -> Result<Vec<StaticObject>, ParseError
     }
 
     Ok(objects)
+}
+
+/// Parse `libraries/wares.xml`. Returns `ware_id (lowercase) → display name`.
+///
+/// `name="{page,id}"` resolved via `translations`; literal names returned as-is;
+/// unknown translation keys fall back to the raw ware id so the UI is never empty.
+pub fn parse_ware_names_xml(
+    xml: &[u8],
+    translations: &HashMap<(u32, u32), String>,
+) -> HashMap<String, String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut out: HashMap<String, String> = HashMap::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"ware" =>
+            {
+                let Some(id) = attr_value(e, b"id") else {
+                    continue;
+                };
+                let id_lc = id.to_lowercase();
+                let name_attr = attr_value(e, b"name").unwrap_or_default();
+                let display = if let Some((pid, tid)) = parse_page_text_ref(&name_attr) {
+                    translations
+                        .get(&(pid, tid))
+                        .cloned()
+                        .unwrap_or_else(|| id_lc.clone())
+                } else if !name_attr.is_empty() {
+                    name_attr
+                } else {
+                    id_lc.clone()
+                };
+                out.insert(id_lc, display);
+            }
+            Ok(Event::Eof) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    #[test]
+    fn parse_translations_xml_includes_wares_page_20201() {
+        let xml = r#"<?xml version="1.0"?>
+<language id="44">
+  <page id="20201">
+    <t id="1101">Energy Cells</t>
+    <t id="1102">Medical Supplies</t>
+  </page>
+</language>"#;
+        let map = super::parse_translations_xml(xml).unwrap();
+        assert_eq!(map.get(&(20201, 1101)).map(String::as_str), Some("Energy Cells"));
+        assert_eq!(map.get(&(20201, 1102)).map(String::as_str), Some("Medical Supplies"));
+    }
+
+    #[test]
+    fn parse_translations_xml_skips_empty_ware_entry() {
+        let xml = r#"<?xml version="1.0"?>
+<language id="44">
+  <page id="20201">
+    <t id="9999"></t>
+  </page>
+</language>"#;
+        let map = super::parse_translations_xml(xml).unwrap();
+        assert!(map.get(&(20201, 9999)).is_none());
+    }
+
+    #[test]
+    fn parse_ware_names_resolves_translations_literals_and_falls_back() {
+        let xml = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/wares_mini.xml"),
+        )
+        .unwrap();
+        let mut translations: HashMap<(u32, u32), String> = HashMap::new();
+        translations.insert((20201, 1101), "Energy Cells".into());
+        translations.insert((20201, 1102), "Medical Supplies".into());
+
+        let names = super::parse_ware_names_xml(&xml, &translations);
+
+        assert_eq!(names.get("energycells").map(String::as_str), Some("Energy Cells"));
+        assert_eq!(names.get("medicalsupplies").map(String::as_str), Some("Medical Supplies"));
+        assert_eq!(names.get("literalwell").map(String::as_str), Some("Hand-Written Name"));
+        // Unknown translation key falls back to raw ware id.
+        assert_eq!(names.get("unknownware").map(String::as_str), Some("unknownware"));
+        // <missingid> has no `id` attribute — skipped.
+        assert!(names.get("missingid").is_none());
+    }
 }

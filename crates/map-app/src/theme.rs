@@ -15,8 +15,10 @@ pub const SHIP_YELLOW: Color32 = Color32::from_rgb(244, 180, 74);
 pub const HOSTILE_RED: Color32 = Color32::from_rgb(239, 68, 68);
 
 pub fn apply(ctx: &egui::Context) {
-    // Install DejaVuSansMono as a fallback font so icon glyphs (⎈ ⚒ ⚔ ⚙ ⌂ ✦ ▦) render
-    // instead of tofu — egui's bundled fonts lack much of Misc Technical / Misc Symbols.
+    // Install DejaVuSansMono as a fallback font so the side-panel icon glyphs
+    // (→ ⇒ ▶ ▴ ◎ ✦) render instead of tofu — egui's bundled fonts lack much of
+    // Misc Technical / Misc Symbols / Arrows. The 3D view no longer needs this
+    // (icons.rs paints vectors), but `sector_panel.rs` still uses Unicode glyphs.
     static FONT_BYTES: &[u8] = include_bytes!("../assets/font.ttf");
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(

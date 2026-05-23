@@ -33,6 +33,7 @@ pub struct World {
     pub parents: HashMap<EntityId, EntityId>,
     pub children: HashMap<EntityId, Vec<EntityId>>,
     pub codes: HashMap<EntityId, String>,
+    pub trade_offers: HashMap<EntityId, Vec<TradeOffer>>,
 }
 
 impl World {
@@ -76,6 +77,10 @@ impl World {
         self.children.get(&id).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    pub fn trade_offers_of(&self, id: EntityId) -> &[TradeOffer] {
+        self.trade_offers.get(&id).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     pub fn entities_in_sector(&self, sector: SectorId) -> &[EntityId] {
         self.sector_idx
             .get(&sector)
@@ -102,6 +107,21 @@ impl World {
                 .push(upd.entity);
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradeDirection {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TradeOffer {
+    pub ware_id: String,
+    pub direction: TradeDirection,
+    pub price: i64,
+    pub amount: i64,
+    pub desired: i64,
 }
 
 #[cfg(test)]
@@ -210,6 +230,36 @@ mod tests {
         assert_eq!(w.children_of(1), &[2]);
         assert_eq!(w.parent_of(1), None);
         assert_eq!(w.codes.get(&1).map(String::as_str), Some("YIB-1"));
+    }
+
+    #[test]
+    fn trade_offers_can_be_inserted_and_looked_up() {
+        use crate::world::{TradeDirection, TradeOffer};
+        let mut w = World::new();
+        w.trade_offers.insert(
+            42,
+            vec![
+                TradeOffer {
+                    ware_id: "energycells".into(),
+                    direction: TradeDirection::Buy,
+                    price: 1092,
+                    amount: 0,
+                    desired: 1200,
+                },
+                TradeOffer {
+                    ware_id: "medicalsupplies".into(),
+                    direction: TradeDirection::Sell,
+                    price: 7174,
+                    amount: 6299,
+                    desired: 6299,
+                },
+            ],
+        );
+        let offers = w.trade_offers_of(42);
+        assert_eq!(offers.len(), 2);
+        assert_eq!(offers[0].direction, TradeDirection::Buy);
+        assert_eq!(offers[1].ware_id, "medicalsupplies");
+        assert!(w.trade_offers_of(999).is_empty());
     }
 }
 
