@@ -16,6 +16,9 @@ pub enum ClickedTarget {
 pub struct SectorViewResponse {
     pub close_clicked: bool,
     pub clicked: Option<ClickedTarget>,
+    /// True when the user clicked in the canvas but hit no target — used to
+    /// clear obj/entity selection.
+    pub clicked_empty: bool,
 }
 
 #[derive(Default)]
@@ -35,11 +38,10 @@ impl SectorView3D {
         let mut close_clicked = false;
 
         let available = ui.available_rect_before_wrap();
-        let canvas_w = available.width() * 0.80;
-        let canvas_rect = Rect::from_min_size(
-            available.min + Vec2::new((available.width() - canvas_w) * 0.5, 0.0),
-            Vec2::new(canvas_w, available.height()),
-        );
+        // Leave a 4 px gap on the right so the side panel's resize handle
+        // stays hittable (mirrors the same trick in map_view).
+        let canvas_w = (available.width() - 4.0).max(1.0);
+        let canvas_rect = Rect::from_min_size(available.min, Vec2::new(canvas_w, available.height()));
 
         // 30px header, remainder is 3D view
         let header_rect = Rect::from_min_size(canvas_rect.min, Vec2::new(canvas_w, 30.0));
@@ -113,18 +115,22 @@ impl SectorView3D {
         );
         ui.painter().add(cb);
 
+        // Clip all 3D-scene overlays to view_rect so projected geometry near
+        // the canvas edge doesn't bleed into the resize gap on the right.
+        let view_painter = ui.painter_at(view_rect);
+
         // Gates drawn as screen-space circles + arrows (constant size, correct orientation)
         if let Some(sec) = sector {
-            draw_gates_2d(ui.painter(), view_rect, camera, sec);
+            draw_gates_2d(&view_painter, view_rect, camera, sec);
         }
 
         // Axis orientation arrows (N/S/E/W/Up/Down) drawn on top of 3D scene
-        draw_axis_arrows(ui.painter(), view_rect, camera);
+        draw_axis_arrows(&view_painter, view_rect, camera);
 
         // Screen-space icon overlay (stations + live entities).
         if let Some(sec) = sector {
             draw_icons_2d(
-                ui.painter(),
+                &view_painter,
                 view_rect,
                 camera,
                 sec,
@@ -137,9 +143,13 @@ impl SectorView3D {
 
         // Click + hover detection — unified across static + live targets.
         let mut clicked: Option<ClickedTarget> = None;
+        let mut clicked_empty = false;
         if canvas_resp.clicked() {
             if let (Some(pos), Some(sec)) = (canvas_resp.interact_pointer_pos(), sector) {
                 clicked = pick_target(pos, view_rect, camera, sec, world);
+                if clicked.is_none() {
+                    clicked_empty = true;
+                }
             }
         }
         let hovered = canvas_resp
@@ -149,7 +159,7 @@ impl SectorView3D {
         // Hover label: tooltip-style box over the hovered target
         if let (Some(target), Some(sec)) = (hovered, sector) {
             draw_hover_label(
-                ui.painter(),
+                &view_painter,
                 view_rect,
                 camera,
                 sec,
@@ -170,6 +180,7 @@ impl SectorView3D {
         SectorViewResponse {
             close_clicked,
             clicked,
+            clicked_empty,
         }
     }
 }

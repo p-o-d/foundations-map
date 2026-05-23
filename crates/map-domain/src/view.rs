@@ -88,6 +88,26 @@ impl ViewMode {
         }
     }
 
+    /// Clear any object or entity selection in 3D view. No-op for UniverseMap.
+    pub fn deselect_all_in_sector(self) -> Self {
+        match self {
+            ViewMode::SectorView { sector, .. } => ViewMode::SectorView {
+                sector,
+                selected_obj: None,
+                selected_entity: None,
+            },
+            other => other,
+        }
+    }
+
+    /// Clear sector selection in UniverseMap. No-op for SectorView.
+    pub fn deselect_sector(self) -> Self {
+        match self {
+            ViewMode::UniverseMap { .. } => ViewMode::UniverseMap { selected: None },
+            other => other,
+        }
+    }
+
     pub fn selected_object(&self) -> Option<ObjectId> {
         match self {
             ViewMode::SectorView { selected_obj, .. } => *selected_obj,

@@ -132,23 +132,34 @@ impl eframe::App for App {
             }
         }
 
-        // Escape: deselect object (not close)
+        // Escape cascade:
+        //  3D + selected obj/entity → clear selection + refit camera.
+        //  3D + nothing selected    → close 3D view back to the 2D map.
+        //  2D + sector selected     → clear sector selection.
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         if escape {
-            if let ViewMode::SectorView {
-                sector,
-                selected_obj: Some(_),
-                ..
-            } = &self.view_mode
-            {
-                let sector = *sector;
-                let positions: Vec<_> = self
-                    .universe
-                    .sector(sector)
-                    .map(|s| s.static_objects.iter().map(|o| o.position).collect())
-                    .unwrap_or_default();
-                self.camera.fit_all(&positions);
-                self.view_mode = self.view_mode.clone().deselect_object();
+            match &self.view_mode {
+                ViewMode::SectorView {
+                    sector,
+                    selected_obj,
+                    selected_entity,
+                } if selected_obj.is_some() || selected_entity.is_some() => {
+                    let sector = *sector;
+                    let positions: Vec<_> = self
+                        .universe
+                        .sector(sector)
+                        .map(|s| s.static_objects.iter().map(|o| o.position).collect())
+                        .unwrap_or_default();
+                    self.camera.fit_all(&positions);
+                    self.view_mode = self.view_mode.clone().deselect_all_in_sector();
+                }
+                ViewMode::SectorView { .. } => {
+                    self.view_mode = self.view_mode.clone().close_sector_3d();
+                }
+                ViewMode::UniverseMap { selected: Some(_) } => {
+                    self.view_mode = self.view_mode.clone().deselect_sector();
+                }
+                _ => {}
             }
         }
 
@@ -240,7 +251,7 @@ impl eframe::App for App {
                             if let Some(s) = self.universe.sector(*sector) {
                                 if let Some(obj) = s.static_objects.iter().find(|o| o.id == obj_id)
                                 {
-                                    self.camera.fit_all(&[obj.position]);
+                                    self.camera.focus_on(obj.position);
                                 }
                             }
                         }
@@ -249,7 +260,7 @@ impl eframe::App for App {
                         self.view_mode = self.view_mode.clone().select_entity(eid);
                         if let Some((_, world)) = &self.snapshot {
                             if let Some(&pos) = world.positions.get(&eid) {
-                                self.camera.fit_all(&[pos]);
+                                self.camera.focus_on(pos);
                             }
                         }
                     }
@@ -260,7 +271,7 @@ impl eframe::App for App {
                             if let Some(parent) = world.parent_of(eid) {
                                 self.view_mode = self.view_mode.clone().select_entity(parent);
                                 if let Some(&pos) = world.positions.get(&parent) {
-                                    self.camera.fit_all(&[pos]);
+                                    self.camera.focus_on(pos);
                                 }
                             }
                         }
@@ -290,23 +301,33 @@ impl eframe::App for App {
                     match sv_resp.clicked {
                         Some(crate::ui::sector_view::ClickedTarget::Static(obj_id)) => {
                             self.view_mode = self.view_mode.clone().select_object(obj_id);
-                            let positions: Vec<_> = self
+                            if let Some(pos) = self
                                 .universe
                                 .sector(sector)
                                 .and_then(|s| s.static_objects.iter().find(|o| o.id == obj_id))
-                                .map(|obj| vec![obj.position])
-                                .unwrap_or_default();
-                            self.camera.fit_all(&positions);
+                                .map(|obj| obj.position)
+                            {
+                                self.camera.focus_on(pos);
+                            }
                         }
                         Some(crate::ui::sector_view::ClickedTarget::Entity(eid)) => {
                             self.view_mode = self.view_mode.clone().select_entity(eid);
                             if let Some((_, world)) = &self.snapshot {
                                 if let Some(&pos) = world.positions.get(&eid) {
-                                    self.camera.fit_all(&[pos]);
+                                    self.camera.focus_on(pos);
                                 }
                             }
                         }
                         None => {}
+                    }
+                    if sv_resp.clicked_empty {
+                        let positions: Vec<_> = self
+                            .universe
+                            .sector(sector)
+                            .map(|s| s.static_objects.iter().map(|o| o.position).collect())
+                            .unwrap_or_default();
+                        self.camera.fit_all(&positions);
+                        self.view_mode = self.view_mode.clone().deselect_all_in_sector();
                     }
                 }
                 ViewMode::UniverseMap { .. } => {
@@ -330,6 +351,8 @@ impl eframe::App for App {
                             .open_sector_3d();
                     } else if let Some(sector_id) = mvr.clicked_sector {
                         self.view_mode = self.view_mode.clone().select_sector(sector_id);
+                    } else if mvr.clicked_empty {
+                        self.view_mode = self.view_mode.clone().deselect_sector();
                     }
                 }
             }

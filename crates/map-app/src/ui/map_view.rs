@@ -524,6 +524,7 @@ impl MapView {
         MapViewResponse {
             clicked_sector,
             double_clicked_sector,
+            clicked_empty: clicked_pos.is_some() && clicked_sector.is_none(),
             response,
         }
     }
@@ -532,6 +533,9 @@ impl MapView {
 pub struct MapViewResponse {
     pub clicked_sector: Option<SectorId>,
     pub double_clicked_sector: Option<SectorId>,
+    /// True when the user clicked somewhere in the canvas but no sector was
+    /// hit — callers use this to clear sector selection.
+    pub clicked_empty: bool,
     pub response: Response,
 }
 

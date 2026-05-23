@@ -42,6 +42,9 @@ impl OrbitCamera {
         self.distance = (self.distance * (1.0 - delta * 0.1)).clamp(1.0, 5_000_000.0);
     }
 
+    /// Frame the whole sector — orbit the sector centre at a distance large
+    /// enough to see every object. Use this when no specific selection should
+    /// drive the camera.
     pub fn fit_all(&mut self, positions: &[Vec3]) {
         if positions.is_empty() {
             self.target = Vec3::ZERO;
@@ -53,6 +56,13 @@ impl OrbitCamera {
         self.distance = ((max_r + 1.0) / 30f32.to_radians().tan()).max(10.0);
         self.yaw = 0.0;
         self.pitch = 0.3;
+    }
+
+    /// Orbit around a single point (selected object/entity). Keeps yaw/pitch
+    /// so the camera glides in rather than snapping orientation.
+    pub fn focus_on(&mut self, point: Vec3) {
+        self.target = point;
+        self.distance = 30.0;
     }
 }
 
@@ -135,5 +145,24 @@ mod tests {
         let mut cam = OrbitCamera::default();
         cam.fit_all(&[]);
         assert_eq!(cam.target, Vec3::ZERO);
+    }
+
+    #[test]
+    fn focus_on_targets_point() {
+        let mut cam = OrbitCamera::default();
+        let pt = Vec3::new(42.0, 5.0, -17.0);
+        cam.focus_on(pt);
+        assert!((cam.target - pt).length() < 1e-3);
+        assert!(cam.distance > 0.0);
+    }
+
+    #[test]
+    fn fit_all_with_single_position_still_centres_on_sector_origin() {
+        // Regression: fit_all is the "frame sector" path, NOT a select-object
+        // path. A sector with a single object (e.g. only one gate) must still
+        // orbit Vec3::ZERO, not the object.
+        let mut cam = OrbitCamera::default();
+        cam.fit_all(&[Vec3::new(100.0, 0.0, 0.0)]);
+        assert!((cam.target - Vec3::ZERO).length() < 1e-3);
     }
 }
