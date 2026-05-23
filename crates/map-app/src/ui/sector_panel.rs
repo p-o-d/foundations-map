@@ -260,7 +260,11 @@ impl SectorPanel {
                     // UniverseMap branch — CONNECTIONS list.
                     ui.colored_label(theme::TEXT_MUTED, "CONNECTIONS");
                     ui.add_space(4.0);
-                    let neighbours = universe.neighbour_ids(sector.id);
+                    let mut neighbours = universe.neighbour_ids(sector.id);
+                    // Dedupe — bidirectional superhighway pairs and any other
+                    // duplicate connection entries should only show once.
+                    neighbours.sort_by_key(|id| id.0);
+                    neighbours.dedup();
                     let conns = universe.connections_for(sector.id);
                     if neighbours.is_empty() {
                         ui.colored_label(theme::TEXT_MUTED, "None");

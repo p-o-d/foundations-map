@@ -275,28 +275,57 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     for zs in &all_zones_strs {
         gate_pairs.extend(parse_gate_connections_xml(zs, &sector_placements));
     }
-    let mut connections: Vec<Connection> = gate_pairs
-        .into_iter()
-        .filter_map(|(a, b)| {
-            Some(Connection {
-                from: *macro_to_id.get(&a)?,
-                to: *macro_to_id.get(&b)?,
-                gate_type: GateType::Standard,
-            })
-        })
-        .collect();
+    // Each zones.xml typically lists the same gate pair from both sides, so
+    // we dedupe by normalised (low, high) sector-id pair to get one Standard
+    // connection per gate. Superhighway connections are loaded separately
+    // below and intentionally kept directional (one-way highways exist).
+    let mut seen_pairs: std::collections::HashSet<(SectorId, SectorId)> =
+        std::collections::HashSet::new();
+    let mut connections: Vec<Connection> = Vec::new();
+    for (a, b) in gate_pairs {
+        let Some(&from) = macro_to_id.get(&a) else {
+            continue;
+        };
+        let Some(&to) = macro_to_id.get(&b) else {
+            continue;
+        };
+        if from == to {
+            continue;
+        }
+        let key = if from.0 <= to.0 {
+            (from, to)
+        } else {
+            (to, from)
+        };
+        if !seen_pairs.insert(key) {
+            continue;
+        }
+        connections.push(Connection {
+            from,
+            to,
+            gate_type: GateType::Standard,
+        });
+    }
 
     // Parse gate positions and populate sectors.
     // Keys from parse_gate_positions_xml come from zones.xml zone names; id_to_macro keys come
     // from clusters.xml. DLC sectors may differ in casing — normalise both to lowercase.
     let mut gate_positions: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> =
         HashMap::new();
+    // Dedupe within each sector keyed on destination name — multiple DLC zones.xml
+    // files often re-declare the same gate, and we don't want it listed twice in
+    // the 3D static-objects section.
+    let mut seen_gates: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
     for zs in &all_zones_strs {
         for (k, v) in parse_gate_positions_xml(zs) {
-            gate_positions
-                .entry(k.to_lowercase())
-                .or_default()
-                .extend(v);
+            let key = k.to_lowercase();
+            let seen = seen_gates.entry(key.clone()).or_default();
+            let list = gate_positions.entry(key).or_default();
+            for entry in v {
+                if seen.insert(entry.3.clone()) {
+                    list.push(entry);
+                }
+            }
         }
     }
     // cluster_num → first sector display name for that cluster, used to label gates.
