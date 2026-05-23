@@ -140,62 +140,77 @@ impl eframe::App for App {
                 .request_repaint_after(std::time::Duration::from_millis(200));
         }
 
-        egui::Panel::right("sector_panel")
-            .exact_size(220.0)
-            .resizable(false)
-            .show_inside(ui, |ui| {
-                let selected = self.view_mode.selected_sector();
-                let sector = selected.and_then(|id| self.universe.sector(id));
-                let panel_resp = self.sector_panel.show(
-                    ui,
-                    sector,
-                    &self.universe,
-                    &self.view_mode,
-                    self.snapshot.as_ref().map(|(_, w)| w),
-                );
-                if panel_resp.open_3d_clicked {
-                    if let Some(s) = sector {
-                        let positions: Vec<_> =
-                            s.static_objects.iter().map(|o| o.position).collect();
-                        self.camera.fit_all(&positions);
+        // Hide the side panel entirely when nothing is selected (universe map with
+        // no sector clicked). The 3D view always has a sector, so the panel stays.
+        if self.view_mode.selected_sector().is_some() {
+            egui::Panel::right("sector_panel")
+                .default_size(330.0)
+                .size_range(220.0..=600.0)
+                .resizable(true)
+                .frame(
+                    egui::Frame::default()
+                        .fill(ui.style().visuals.panel_fill)
+                        .inner_margin(egui::Margin {
+                            left: 4,
+                            right: 12,
+                            top: 0,
+                            bottom: 0,
+                        }),
+                )
+                .show_inside(ui, |ui| {
+                    let selected = self.view_mode.selected_sector();
+                    let sector = selected.and_then(|id| self.universe.sector(id));
+                    let panel_resp = self.sector_panel.show(
+                        ui,
+                        sector,
+                        &self.universe,
+                        &self.view_mode,
+                        self.snapshot.as_ref().map(|(_, w)| w),
+                    );
+                    if panel_resp.open_3d_clicked {
+                        if let Some(s) = sector {
+                            let positions: Vec<_> =
+                                s.static_objects.iter().map(|o| o.position).collect();
+                            self.camera.fit_all(&positions);
+                        }
+                        self.view_mode = self.view_mode.clone().open_sector_3d();
                     }
-                    self.view_mode = self.view_mode.clone().open_sector_3d();
-                }
-                if panel_resp.back_to_map_clicked {
-                    self.view_mode = self.view_mode.clone().close_sector_3d();
-                }
-                if let Some(obj_id) = panel_resp.object_clicked {
-                    self.view_mode = self.view_mode.clone().select_object(obj_id);
-                    if let ViewMode::SectorView { sector, .. } = &self.view_mode {
-                        if let Some(s) = self.universe.sector(*sector) {
-                            if let Some(obj) = s.static_objects.iter().find(|o| o.id == obj_id) {
-                                self.camera.fit_all(&[obj.position]);
+                    if panel_resp.back_to_map_clicked {
+                        self.view_mode = self.view_mode.clone().close_sector_3d();
+                    }
+                    if let Some(obj_id) = panel_resp.object_clicked {
+                        self.view_mode = self.view_mode.clone().select_object(obj_id);
+                        if let ViewMode::SectorView { sector, .. } = &self.view_mode {
+                            if let Some(s) = self.universe.sector(*sector) {
+                                if let Some(obj) = s.static_objects.iter().find(|o| o.id == obj_id)
+                                {
+                                    self.camera.fit_all(&[obj.position]);
+                                }
                             }
                         }
                     }
-                }
-                if let Some(eid) = panel_resp.entity_clicked {
-                    self.view_mode = self.view_mode.clone().select_entity(eid);
-                    if let Some((_, world)) = &self.snapshot {
-                        if let Some(&pos) = world.positions.get(&eid) {
-                            self.camera.fit_all(&[pos]);
-                        }
-                    }
-                }
-                if panel_resp.back_to_parent_clicked {
-                    if let (Some(eid), Some((_, world))) = (
-                        self.view_mode.selected_entity(),
-                        self.snapshot.as_ref(),
-                    ) {
-                        if let Some(parent) = world.parent_of(eid) {
-                            self.view_mode = self.view_mode.clone().select_entity(parent);
-                            if let Some(&pos) = world.positions.get(&parent) {
+                    if let Some(eid) = panel_resp.entity_clicked {
+                        self.view_mode = self.view_mode.clone().select_entity(eid);
+                        if let Some((_, world)) = &self.snapshot {
+                            if let Some(&pos) = world.positions.get(&eid) {
                                 self.camera.fit_all(&[pos]);
                             }
                         }
                     }
-                }
-            });
+                    if panel_resp.back_to_parent_clicked {
+                        if let (Some(eid), Some((_, world))) =
+                            (self.view_mode.selected_entity(), self.snapshot.as_ref())
+                        {
+                            if let Some(parent) = world.parent_of(eid) {
+                                self.view_mode = self.view_mode.clone().select_entity(parent);
+                                if let Some(&pos) = world.positions.get(&parent) {
+                                    self.camera.fit_all(&[pos]);
+                                }
+                            }
+                        }
+                    }
+                });
+        }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let selected = self.view_mode.selected_sector();
@@ -222,9 +237,7 @@ impl eframe::App for App {
                             let positions: Vec<_> = self
                                 .universe
                                 .sector(sector)
-                                .and_then(|s| {
-                                    s.static_objects.iter().find(|o| o.id == obj_id)
-                                })
+                                .and_then(|s| s.static_objects.iter().find(|o| o.id == obj_id))
                                 .map(|obj| vec![obj.position])
                                 .unwrap_or_default();
                             self.camera.fit_all(&positions);

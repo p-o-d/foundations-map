@@ -209,7 +209,9 @@ impl MapView {
         world: Option<&World>,
         selected: Option<SectorId>,
     ) -> MapViewResponse {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        // Leave a 4 px gap on the right so the side panel's resize handle stays hittable.
+        let avail = ui.available_size() - egui::vec2(4.0, 0.0);
+        let (rect, response) = ui.allocate_exact_size(avail, Sense::click_and_drag());
 
         // Re-fit on first frame or when window grows
         let grew = rect.width() > self.last_rect_size.x + 2.0
