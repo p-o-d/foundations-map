@@ -113,6 +113,31 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     }
     eprintln!("[map] Ware names: {}", ware_names.len());
 
+    // Macro identifications: for each ship_*/station_* macro, read the macro
+    // definition file and extract `<identification name="{p,t}"/>`. Used as a
+    // fallback when a save entity lacks a per-instance name=/basename= attr.
+    // First-match-wins across main + DLC archives (matches mapdefaults pattern).
+    let mut macro_index: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "index/macros.xml") {
+        for (k, v) in crate::macro_index::parse_macros_index(&data) {
+            macro_index.entry(k).or_insert(v);
+        }
+    }
+    let mut macro_identifications: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for (macro_name, path) in &macro_index {
+        if !(macro_name.starts_with("ship_") || macro_name.starts_with("station_")) {
+            continue;
+        }
+        let Some(macro_xml) = crate::cat_reader::read_game_file(game_dir, path) else {
+            continue;
+        };
+        if let Some(ref_str) = crate::macro_identification::parse_macro_identification(&macro_xml) {
+            macro_identifications.insert(macro_name.clone(), ref_str);
+        }
+    }
+    eprintln!("[map] Macro identifications: {}", macro_identifications.len());
+
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
     let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
         std::collections::HashMap::new();
@@ -475,7 +500,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         translations,
         available_locales,
         current_locale: locale,
-        macro_identifications: HashMap::new(),
+        macro_identifications,
     };
 
     // Assign sequential FactionIds and populate the faction table.
