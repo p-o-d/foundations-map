@@ -477,16 +477,12 @@ fn draw_hover_label(
         }
         ClickedTarget::Entity(eid) => {
             if let Some(world) = world {
-                let code = world.codes.get(&eid).cloned();
-                let macro_name = world.names.get(&eid).cloned();
-                let human = macro_name.as_deref().map(crate::colors::strip_macro);
-                if let Some(c) = &code {
-                    lines.push((c.clone(), crate::theme::ACCENT));
+                let name = crate::colors::resolve_entity_label_without_code(world, universe, eid);
+                if !name.is_empty() {
+                    lines.push((name, crate::theme::TEXT_PRIMARY));
                 }
-                if let Some(h) = &human {
-                    if !h.is_empty() && Some(h) != code.as_ref() {
-                        lines.push((h.clone(), crate::theme::TEXT_PRIMARY));
-                    }
+                if let Some(code) = world.codes.get(&eid) {
+                    lines.push((code.clone(), crate::theme::TEXT_MUTED));
                 }
                 if let Some(&fid) = world.factions.get(&eid) {
                     let f_name = crate::colors::faction_name(universe, fid);

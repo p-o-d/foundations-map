@@ -113,6 +113,28 @@ pub fn resolve_entity_label(
     }
 }
 
+/// Resolve only the class-name portion of the entity label (no code in parens).
+/// Used by callers that render the code on its own line.
+pub fn resolve_entity_label_without_code(
+    world: &map_domain::world::World,
+    universe: &map_domain::universe::Universe,
+    eid: map_domain::world::EntityId,
+) -> String {
+    if !world.names.contains_key(&eid) {
+        return String::new();
+    }
+    let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
+    world
+        .display_name_refs
+        .get(&eid)
+        .map(|raw| replace_translation_refs(raw, &universe.translations))
+        .filter(|s| !s.is_empty() && !s.starts_with('{'))
+        .unwrap_or_else(|| {
+            let stripped = strip_macro(&macro_name);
+            if stripped.is_empty() { macro_name } else { stripped }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +271,14 @@ mod tests {
         let u = sample_universe();
         let w = sample_world();
         assert_eq!(resolve_entity_label(&w, &u, 999), "");
+    }
+
+    #[test]
+    fn resolve_entity_label_without_code_omits_code() {
+        let u = sample_universe();
+        let w = sample_world();
+        assert_eq!(resolve_entity_label_without_code(&w, &u, 1), "Cerberus Vanguard");
+        assert_eq!(resolve_entity_label_without_code(&w, &u, 2), "My Best Ship");
+        assert_eq!(resolve_entity_label_without_code(&w, &u, 3), "ship xen n fighter 01 a");
     }
 }
