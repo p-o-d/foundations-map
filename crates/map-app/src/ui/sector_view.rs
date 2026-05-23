@@ -626,7 +626,10 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
             );
         }
 
-        let center = Vec3::new(obj.position.x, 0.0, obj.position.z);
+        // Arrow starts at the ring centre (ring is drawn around obj.position).
+        // Previously this was forced to Y=0, which left the arrow detached
+        // from the ring for any gate above or below the sector plane.
+        let center = obj.position;
         let Some(s_center) = project(center) else {
             continue;
         };
