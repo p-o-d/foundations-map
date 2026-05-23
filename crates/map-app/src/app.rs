@@ -17,6 +17,7 @@ pub struct App {
     pub snapshot_loading: bool,
     pub snapshot_tx: mpsc::Sender<SnapshotMessage>,
     pub snapshot_rx: mpsc::Receiver<SnapshotMessage>,
+    pub settings: crate::settings::AppSettings,
     top_bar: TopBar,
     map_view: MapView,
     sector_panel: SectorPanel,
@@ -40,6 +41,9 @@ impl App {
             rs.renderer.write().callback_resources.insert(scene);
         }
 
+        let settings = crate::settings::load(cc.storage);
+        eprintln!("[map] Loaded settings: locale={}", settings.locale);
+
         Self {
             universe,
             view_mode: ViewMode::initial(),
@@ -50,6 +54,7 @@ impl App {
             snapshot_loading: true,
             snapshot_tx,
             snapshot_rx,
+            settings,
             top_bar: TopBar::default(),
             map_view: MapView::default(),
             sector_panel: SectorPanel::default(),
@@ -59,7 +64,34 @@ impl App {
     }
 }
 
+impl App {
+    pub fn reload_galaxy(&mut self, locale: u32, game_dir: &std::path::Path) {
+        eprintln!("[map] Reloading universe with locale {}", locale);
+        match map_io::xml_parser::parse_galaxy_from_game(game_dir, locale) {
+            Ok(universe) => {
+                self.universe = universe;
+                self.settings.locale = locale;
+                self.snapshot = None;
+                self.snapshot_loading = true;
+                crate::spawn_save_parse(
+                    self.snapshot_tx.clone(),
+                    self.universe.sector_macros.clone(),
+                    self.universe.faction_strings.clone(),
+                    (self.universe.faction_strings.len() as u32) + 1,
+                );
+            }
+            Err(e) => {
+                eprintln!("[map] Locale switch failed (parse error): {:?}", e);
+            }
+        }
+    }
+}
+
 impl eframe::App for App {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        crate::settings::save(storage, &self.settings);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Drain any pending save-parse results.
         while let Ok(msg) = self.snapshot_rx.try_recv() {
