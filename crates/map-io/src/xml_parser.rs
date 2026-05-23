@@ -475,6 +475,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         translations,
         available_locales,
         current_locale: locale,
+        macro_identifications: HashMap::new(),
     };
 
     // Assign sequential FactionIds and populate the faction table.
@@ -1652,6 +1653,7 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         translations: HashMap::new(),
         available_locales: Vec::new(),
         current_locale: 44,
+        macro_identifications: HashMap::new(),
     })
 }
 

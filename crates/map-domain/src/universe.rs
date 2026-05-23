@@ -69,6 +69,11 @@ pub struct Universe {
     pub available_locales: Vec<u32>,
     /// Locale ID this Universe was loaded with (e.g. 44 for English).
     pub current_locale: u32,
+    /// Lowercase macro name (e.g. "ship_par_l_trans_container_03_a_macro") →
+    /// raw `<identification name=...>` ref from the macro definition file
+    /// (e.g. "{20101,30804}"). Resolved at display time via translations.
+    /// Used as a fallback when a save entity carries no per-instance name=.
+    pub macro_identifications: std::collections::HashMap<String, String>,
 }
 
 impl Universe {
@@ -107,6 +112,7 @@ mod tests {
             translations: HashMap::new(),
             available_locales: Vec::new(),
             current_locale: 0,
+            macro_identifications: HashMap::new(),
             sectors: vec![
                 Sector {
                     id: a,
@@ -199,5 +205,17 @@ mod tests {
         assert_eq!(u.translations.get(&(20101, 122701)).map(String::as_str), Some("Cerberus Vanguard"));
         assert_eq!(u.available_locales, vec![44, 49, 33]);
         assert_eq!(u.current_locale, 44);
+    }
+
+    #[test]
+    fn macro_identifications_round_trip() {
+        let mut u = Universe::default();
+        u.macro_identifications
+            .insert("ship_par_l_trans_container_03_a_macro".into(), "{20101,30804}".into());
+        assert_eq!(
+            u.macro_identifications.get("ship_par_l_trans_container_03_a_macro").map(String::as_str),
+            Some("{20101,30804}")
+        );
+        assert!(u.macro_identifications.get("missing").is_none());
     }
 }
