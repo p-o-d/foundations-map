@@ -126,7 +126,10 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     let mut macro_identifications: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     for (macro_name, path) in &macro_index {
-        if !(macro_name.starts_with("ship_") || macro_name.starts_with("station_")) {
+        // Restrict to ship + station macro files. Filter by asset PATH rather
+        // than macro-name prefix so entries like landmarks_* (class="station"
+        // but no `station_` prefix) are still picked up.
+        if !(path.starts_with("assets/units/") || path.starts_with("assets/structures/")) {
             continue;
         }
         let Some(macro_xml) = crate::cat_reader::read_game_file(game_dir, path) else {
