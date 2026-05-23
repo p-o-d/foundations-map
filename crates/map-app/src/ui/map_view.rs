@@ -170,10 +170,12 @@ impl Default for MapView {
 
 impl MapView {
     pub fn universe_to_screen(&self, rect: Rect, pos: GVec2) -> Pos2 {
+        // X4's galaxy axes: +z = north (top of in-game map). egui's screen
+        // axes: +y = down. Negate so a +z sector lands above the origin.
         let center = rect.center();
         Pos2::new(
             center.x + self.pan.x + pos.x * self.zoom,
-            center.y + self.pan.y + pos.y * self.zoom,
+            center.y + self.pan.y - pos.y * self.zoom,
         )
     }
 
@@ -199,7 +201,9 @@ impl MapView {
         self.min_zoom = self.zoom;
         let cx = (min_x + max_x) / 2.0;
         let cz = (min_z + max_z) / 2.0;
-        self.pan = Vec2::new(-cx * self.zoom, -cz * self.zoom);
+        // Match the y-flip in universe_to_screen so the universe-space centre
+        // lands at the screen-space centre.
+        self.pan = Vec2::new(-cx * self.zoom, cz * self.zoom);
     }
 
     pub fn show(
@@ -226,6 +230,16 @@ impl MapView {
 
         // Background
         painter.rect_filled(rect, 0.0, theme::BG_DARK);
+
+        // Resolve the player faction once for the player-ship badge below.
+        let player_faction_id: Option<map_domain::ids::FactionId> =
+            universe.faction_strings.get("player").copied();
+        let player_badge_bg: Option<egui::Color32> = player_faction_id
+            .and_then(|fid| universe.faction_table.get(&fid))
+            .map(|meta| {
+                let [r, g, b, _] = meta.color;
+                egui::Color32::from_rgba_unmultiplied(r, g, b, 220)
+            });
 
         // Sector nodes
         let mut clicked_sector: Option<SectorId> = None;
@@ -445,24 +459,47 @@ impl MapView {
                 .map(|w| w.entities_in_sector(sector.id).len())
                 .unwrap_or(0);
             if count > 0 {
-                let label = if count > 999 {
-                    format!("{}k", count / 1000)
-                } else {
-                    count.to_string()
-                };
-                let font = egui::FontId::proportional(9.0);
-                let galley =
-                    painter.layout_no_wrap(label.clone(), font.clone(), egui::Color32::WHITE);
-                let pad = egui::Vec2::new(4.0, 1.0);
-                let badge_size = galley.size() + pad * 2.0;
-                let badge_center = screen_pos + egui::Vec2::new(hex_r * 0.6, -hex_r * 0.6);
-                let badge_rect = egui::Rect::from_center_size(badge_center, badge_size);
-                painter.rect_filled(
-                    badge_rect,
-                    egui::CornerRadius::same(3),
+                draw_count_badge(
+                    &painter,
+                    screen_pos + egui::Vec2::new(hex_r * 0.6, -hex_r * 0.6),
+                    count,
                     egui::Color32::from_rgba_unmultiplied(40, 50, 80, 220),
                 );
-                painter.galley(badge_rect.min + pad, galley, egui::Color32::WHITE);
+            }
+
+            // Player-ship badge in the top-left corner. Counts every player-faction
+            // ship in the sector including docked children.
+            let player_count = world
+                .zip(player_faction_id)
+                .map(|(w, pid)| {
+                    use map_domain::world::LiveObjectKind;
+                    w.entities_in_sector(sector.id)
+                        .iter()
+                        .filter(|eid| w.factions.get(*eid).copied() == Some(pid))
+                        .filter(|eid| {
+                            matches!(
+                                w.kinds.get(*eid),
+                                Some(
+                                    LiveObjectKind::ShipExtraLarge
+                                        | LiveObjectKind::ShipLarge
+                                        | LiveObjectKind::ShipMedium
+                                        | LiveObjectKind::ShipSmall
+                                )
+                            )
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            if player_count > 0 {
+                let bg = player_badge_bg.unwrap_or(egui::Color32::from_rgba_unmultiplied(
+                    40, 50, 80, 220,
+                ));
+                draw_count_badge(
+                    &painter,
+                    screen_pos + egui::Vec2::new(-hex_r * 0.6, -hex_r * 0.6),
+                    player_count,
+                    bg,
+                );
             }
         }
 
@@ -497,6 +534,24 @@ pub struct MapViewResponse {
     pub clicked_sector: Option<SectorId>,
     pub double_clicked_sector: Option<SectorId>,
     pub response: Response,
+}
+
+/// Draw a small white-text count badge centred at `center`. Used for both the
+/// total-ship-count badge (top-right of a sector hex) and the player-ship
+/// badge (top-left, with the player faction colour as background).
+fn draw_count_badge(painter: &egui::Painter, center: Pos2, count: usize, bg: egui::Color32) {
+    let label = if count > 999 {
+        format!("{}k", count / 1000)
+    } else {
+        count.to_string()
+    };
+    let font = egui::FontId::proportional(9.0);
+    let galley = painter.layout_no_wrap(label, font, egui::Color32::WHITE);
+    let pad = egui::Vec2::new(4.0, 1.0);
+    let badge_size = galley.size() + pad * 2.0;
+    let badge_rect = egui::Rect::from_center_size(center, badge_size);
+    painter.rect_filled(badge_rect, egui::CornerRadius::same(3), bg);
+    painter.galley(badge_rect.min + pad, galley, egui::Color32::WHITE);
 }
 
 #[cfg(test)]
