@@ -318,11 +318,10 @@ mod tests {
     fn resolve_entity_label_uses_production_module_for_factory() {
         let mut u = sample_universe();
         // Production module identification.
-        u.translations.insert((20104, 11901), "Microchip Production".into());
-        u.macro_identifications.insert(
-            "prod_gen_microchips_macro".into(),
-            "{20104,11901}".into(),
-        );
+        u.translations
+            .insert((20104, 11901), "Microchip Production".into());
+        u.macro_identifications
+            .insert("prod_gen_microchips_macro".into(), "{20104,11901}".into());
         // Generic factory basename.
         u.translations.insert((20102, 1701), "Factory".into());
         let mut w = sample_world();
@@ -340,7 +339,10 @@ mod tests {
         w.display_name_refs.insert(7, "{20102,1701}".into());
         w.production_modules
             .insert(7, "prod_gen_microchips_macro".into());
-        assert_eq!(resolve_entity_label(&w, &u, 7), "Microchip Production (FAC-001)");
+        assert_eq!(
+            resolve_entity_label(&w, &u, 7),
+            "Microchip Production (FAC-001)"
+        );
     }
 
     #[test]

@@ -491,9 +491,8 @@ impl MapView {
                 })
                 .unwrap_or(0);
             if player_count > 0 {
-                let bg = player_badge_bg.unwrap_or(egui::Color32::from_rgba_unmultiplied(
-                    40, 50, 80, 220,
-                ));
+                let bg = player_badge_bg
+                    .unwrap_or(egui::Color32::from_rgba_unmultiplied(40, 50, 80, 220));
                 draw_count_badge(
                     &painter,
                     screen_pos + egui::Vec2::new(-hex_r * 0.6, -hex_r * 0.6),
@@ -560,8 +559,7 @@ fn draw_count_badge(painter: &egui::Painter, center: Pos2, count: usize, bg: egu
 /// against egui's antialiased text.
 fn contrast_text_color(bg: egui::Color32) -> egui::Color32 {
     let [r, g, b, _] = bg.to_array();
-    let luminance =
-        0.2126 * (r as f32) + 0.7152 * (g as f32) + 0.0722 * (b as f32);
+    let luminance = 0.2126 * (r as f32) + 0.7152 * (g as f32) + 0.0722 * (b as f32);
     if luminance > 140.0 {
         egui::Color32::BLACK
     } else {

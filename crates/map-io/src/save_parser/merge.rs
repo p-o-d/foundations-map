@@ -56,7 +56,9 @@ pub fn merge(
                 world.display_name_refs.insert(entity_id, name_ref);
             }
             if let Some(mc) = production_module_macro {
-                world.production_modules.insert(entity_id, mc.to_lowercase());
+                world
+                    .production_modules
+                    .insert(entity_id, mc.to_lowercase());
             }
         }
     }
