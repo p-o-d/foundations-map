@@ -30,7 +30,7 @@ pub enum SnapshotMessage {
 
 fn main() -> eframe::Result<()> {
     // Attempt to load universe from game files
-    let universe = load_universe();
+    let universe = load_universe(44);
 
     // Spawn the initial save-parse on a background thread so the UI starts
     // without blocking on ~300 MB of XML decompression.
@@ -109,7 +109,7 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-fn load_universe() -> map_domain::universe::Universe {
+fn load_universe(locale: u32) -> map_domain::universe::Universe {
     let game_path = map_io::game_path::detect();
 
     let Some(game_dir) = game_path else {
@@ -119,7 +119,7 @@ fn load_universe() -> map_domain::universe::Universe {
 
     eprintln!("[map] Found game at: {:?}", game_dir);
 
-    match map_io::xml_parser::parse_galaxy_from_game(&game_dir, 44) {
+    match map_io::xml_parser::parse_galaxy_from_game(&game_dir, locale) {
         Ok(universe) => {
             eprintln!("[map] Loaded {} sectors.", universe.sectors.len());
             universe

@@ -44,7 +44,7 @@ impl App {
         let settings = crate::settings::load(cc.storage);
         eprintln!("[map] Loaded settings: locale={}", settings.locale);
 
-        Self {
+        let mut app = Self {
             universe,
             view_mode: ViewMode::initial(),
             camera: OrbitCamera::default(),
@@ -60,7 +60,18 @@ impl App {
             sector_panel: SectorPanel::default(),
             sector_view: SectorView3D::default(),
             _save_watcher: save_watcher,
+        };
+
+        // If the user previously picked a non-default locale, trigger a
+        // deferred reload now so the first interactive frame uses the right
+        // language. First-frame English flash is a minor UX wart.
+        if app.settings.locale != 44 {
+            if let Some(game_dir) = map_io::game_path::detect() {
+                app.reload_galaxy(app.settings.locale, &game_dir);
+            }
         }
+
+        app
     }
 }
 
