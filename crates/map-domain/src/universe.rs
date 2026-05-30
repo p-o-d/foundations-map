@@ -74,6 +74,11 @@ pub struct Universe {
     /// (e.g. "{20101,30804}"). Resolved at display time via translations.
     /// Used as a fallback when a save entity carries no per-instance name=.
     pub macro_identifications: std::collections::HashMap<String, String>,
+    /// Lowercase zone macro → sector-relative position in metres. Object/gate
+    /// offsets in zones.xml and the save are zone-relative; adding the zone's
+    /// position here yields the true sector-relative position. Used by the save
+    /// parser to place live ships/stations consistently with static gates.
+    pub zone_positions: std::collections::HashMap<String, (f32, f32, f32)>,
 }
 
 impl Universe {
@@ -113,6 +118,7 @@ mod tests {
             available_locales: Vec::new(),
             current_locale: 0,
             macro_identifications: HashMap::new(),
+            zone_positions: HashMap::new(),
             sectors: vec![
                 Sector {
                     id: a,

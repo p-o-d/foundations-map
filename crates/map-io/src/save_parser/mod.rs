@@ -31,6 +31,7 @@ pub use types::FactionOverrides;
 pub fn parse_save(
     path: &Path,
     sector_macros: Option<&HashMap<String, SectorId>>,
+    zone_positions: &HashMap<String, (f32, f32, f32)>,
     faction_strings: &mut HashMap<String, FactionId>,
     next_faction_id: &mut u32,
 ) -> Result<(SnapshotMeta, World, FactionOverrides), ParseError> {
@@ -81,6 +82,7 @@ pub fn parse_save(
     let world = merge::merge(
         entity_lists,
         sector_macros,
+        zone_positions,
         faction_strings,
         next_faction_id,
     );
@@ -108,8 +110,9 @@ mod tests {
     fn parse_mini_save_meta_and_overrides() {
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut nx = 1u32;
+        let zp = HashMap::new();
         let (meta, _world, overrides) =
-            parse_save(&fixture_path(), None, &mut fs, &mut nx).unwrap();
+            parse_save(&fixture_path(), None, &zp, &mut fs, &mut nx).unwrap();
         assert_eq!(meta.player_money, 40000);
         assert!((meta.game_time_seconds - 1734.285).abs() < 1e-2);
         assert_eq!(meta.player_location_name, "{20004,10011}");
@@ -123,7 +126,9 @@ mod tests {
         sm.insert("cluster_06_sector001_macro".into(), SectorId(2));
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut nx = 1u32;
-        let (_meta, world, _) = parse_save(&fixture_path(), Some(&sm), &mut fs, &mut nx).unwrap();
+        let zp = HashMap::new();
+        let (_meta, world, _) =
+            parse_save(&fixture_path(), Some(&sm), &zp, &mut fs, &mut nx).unwrap();
         assert_eq!(world.names.len(), 4);
         assert_eq!(world.entities_in_sector(SectorId(1)).len(), 2);
         assert_eq!(world.entities_in_sector(SectorId(2)).len(), 2);

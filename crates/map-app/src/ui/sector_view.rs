@@ -41,7 +41,8 @@ impl SectorView3D {
         // Leave a 4 px gap on the right so the side panel's resize handle
         // stays hittable (mirrors the same trick in map_view).
         let canvas_w = (available.width() - 4.0).max(1.0);
-        let canvas_rect = Rect::from_min_size(available.min, Vec2::new(canvas_w, available.height()));
+        let canvas_rect =
+            Rect::from_min_size(available.min, Vec2::new(canvas_w, available.height()));
 
         // 30px header, remainder is 3D view
         let header_rect = Rect::from_min_size(canvas_rect.min, Vec2::new(canvas_w, 30.0));
@@ -358,14 +359,17 @@ fn pick_target(
     best.map(|(_, t)| t)
 }
 
-/// Draw 6 direction arrows from sector origin: E(+X), W(-X), Up(+Y), Dn(-Y), N(-Z), S(+Z).
+/// Draw 6 direction arrows from sector origin: E(+X), W(-X), Up(+Y), Dn(-Y), N(+Z), S(-Z).
 /// Arrow length scales with camera distance so they remain visible at all zoom levels.
 fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera) {
     let aspect = view_rect.width() / view_rect.height().max(1.0);
     let vp = camera.proj_matrix(aspect) * camera.view_matrix();
     let arm = camera.distance * 0.15;
 
-    let center = Vec3::ZERO;
+    // Anchor the compass at the camera target (screen centre) rather than the
+    // sector macro origin — fit_all now frames the content centre, which is
+    // usually offset from the origin, so an origin-anchored gnomon drifts away.
+    let center = camera.target;
     let axes: &[(&str, Vec3, egui::Color32)] = &[
         (
             "E",
@@ -389,12 +393,12 @@ fn draw_axis_arrows(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCame
         ),
         (
             "N",
-            center + Vec3::new(0.0, 0.0, -arm),
+            center + Vec3::new(0.0, 0.0, arm),
             egui::Color32::from_rgb(80, 180, 220),
         ),
         (
             "S",
-            center + Vec3::new(0.0, 0.0, arm),
+            center + Vec3::new(0.0, 0.0, -arm),
             egui::Color32::from_rgb(220, 140, 50),
         ),
     ];
@@ -542,15 +546,23 @@ fn draw_hover_label(
 }
 
 /// Draw gates with correct orientation at constant pixel size on screen.
-/// Arrow lies on the Y=0 horizontal plane, points toward sector center (origin), single-sided.
-/// Ring is in 3D plane perpendicular to the arrow direction, polyline projected to screen.
-/// World-space size derived from camera distance so on-screen size stays constant.
+/// Arrow lies on the Y=0 horizontal plane, points toward the sector content
+/// centre (gate/zone bounding-box centre). Ring is in a 3D plane perpendicular
+/// to the arrow direction, polyline projected to screen. World-space size
+/// derived from camera distance so on-screen size stays constant.
 fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera, sector: &Sector) {
     let aspect = view_rect.width() / view_rect.height().max(1.0);
     let vp = camera.proj_matrix(aspect) * camera.view_matrix();
     let cam_eye = camera.eye();
     // 2 * tan(fov_y / 2). FOV here matches OrbitCamera::proj_matrix (60° vertical).
     let fov_factor = 2.0 * 30.0_f32.to_radians().tan();
+
+    // Sector content centre = bounding-box centre of all static objects (the
+    // same point fit_all frames). Arrows always point here, independent of the
+    // camera target — selecting an object moves the target but must not swing
+    // the gates.
+    let positions: Vec<Vec3> = sector.static_objects.iter().map(|o| o.position).collect();
+    let content_center = crate::renderer::camera::content_center(&positions);
 
     let project = |world: Vec3| -> Option<egui::Pos2> {
         let clip = vp * world.extend(1.0);
@@ -578,8 +590,10 @@ fn draw_gates_2d(painter: &egui::Painter, view_rect: Rect, camera: &OrbitCamera,
             continue;
         }
 
-        // Arrow direction: horizontal toward sector center (Y=0 plane).
-        let mut dir = -obj.position;
+        // Arrow direction: horizontal toward the sector content centre (gate/zone
+        // bounding-box centre) — fixed, not the camera target (which follows the
+        // current selection) and not the macro origin (usually off to one side).
+        let mut dir = content_center - obj.position;
         dir.y = 0.0;
         if dir.length() < 0.001 {
             continue;

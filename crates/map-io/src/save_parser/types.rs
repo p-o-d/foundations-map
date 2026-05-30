@@ -25,8 +25,14 @@ pub struct EntityRecord {
     pub code: Option<String>,
     pub kind: LiveObjectKind,
     pub owner: Option<String>,
-    pub position: glam::Vec3, // already km (metres / 1000)
+    /// Sum of the offsets from the nearest enclosing zone down to this entity,
+    /// in km — i.e. the position relative to that zone. `merge` adds
+    /// `zone_positions[zone_macro]` to reach the true sector-relative position.
+    pub position: glam::Vec3, // km (metres / 1000)
     pub sector_macro: String, // lowercase
+    /// Lowercase macro of the nearest enclosing `<component class="zone">`, used
+    /// to look up the zone's sector-relative position. `None` if no zone ancestor.
+    pub zone_macro: Option<String>,
     pub trade_offers: Vec<TradeOffer>,
     pub display_name_ref: Option<String>,
     pub production_module_macro: Option<String>,
@@ -58,6 +64,7 @@ mod tests {
             owner: Some("argon".into()),
             position: glam::Vec3::new(0.0, 0.0, 0.0),
             sector_macro: "cluster_01_sector001_macro".into(),
+            zone_macro: None,
             trade_offers: vec![],
             display_name_ref: Some("{20102,1701}".into()),
             production_module_macro: None,

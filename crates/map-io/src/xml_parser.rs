@@ -307,6 +307,14 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         });
     }
 
+    // Zone sector-relative positions (metres), keyed by zone macro. Gate/object
+    // offsets in zones.xml are zone-relative; adding these yields true sector positions.
+    let mut zone_positions: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    for ss in &all_sectors_strs {
+        zone_positions.extend(parse_zone_positions_xml(ss));
+    }
+    eprintln!("[map] Zone positions: {}", zone_positions.len());
+
     // Parse gate positions and populate sectors.
     // Keys from parse_gate_positions_xml come from zones.xml zone names; id_to_macro keys come
     // from clusters.xml. DLC sectors may differ in casing — normalise both to lowercase.
@@ -317,7 +325,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     // the 3D static-objects section.
     let mut seen_gates: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
     for zs in &all_zones_strs {
-        for (k, v) in parse_gate_positions_xml(zs) {
+        for (k, v) in parse_gate_positions_xml(zs, &zone_positions) {
             let key = k.to_lowercase();
             let seen = seen_gates.entry(key.clone()).or_default();
             let list = gate_positions.entry(key).or_default();
@@ -384,7 +392,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         Vec<(f32, f32, f32, StaticObjectKind, String, String)>,
     > = HashMap::new();
     for zs in &all_zones_strs {
-        for (k, v) in parse_non_gate_objects_xml(zs) {
+        for (k, v) in parse_non_gate_objects_xml(zs, &zone_positions) {
             non_gate_objects
                 .entry(k.to_lowercase())
                 .or_default()
@@ -544,6 +552,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         available_locales,
         current_locale: locale,
         macro_identifications,
+        zone_positions,
     };
 
     // Assign sequential FactionIds and populate the faction table.
@@ -969,17 +978,29 @@ fn parse_gate_connections_xml(
 /// Their `<offset><position x y z />` is in metres; we divide by 1000 to get km.
 fn parse_gate_positions_xml(
     xml: &str,
+    zone_positions: &HashMap<String, (f32, f32, f32)>,
 ) -> HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut result: HashMap<String, Vec<(f32, f32, f32, String, (f32, f32, f32))>> = HashMap::new();
     let mut current_sector: Option<String> = None;
+    // Sector-relative position of the zone currently being parsed (metres). Gate
+    // offsets are zone-relative; add this to recover the true sector position.
+    let mut current_zone_off: (f32, f32, f32) = (0.0, 0.0, 0.0);
     let mut in_gate_conn = false;
     let mut in_offset = false;
     let mut gate_dest: Option<String> = None;
     let mut gate_pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
     let mut gate_rot: (f32, f32, f32) = (0.0, 0.0, 0.0);
+    // First `<offset>` under a gate connection wins — animated-gate prop macros
+    // nest their own offsets, which must not overwrite the gate's position.
+    let mut gate_pos_set = false;
+    // `<macro>` nesting depth and the depth at which the current zone macro opened.
+    // A gate's prop macro is also a `<macro>`; its `</macro>` must NOT reset the
+    // zone/gate state — only the zone macro's own close does.
+    let mut macro_depth: u32 = 0;
+    let mut zone_macro_depth: Option<u32> = None;
     let mut buf = Vec::new();
 
     loop {
@@ -987,10 +1008,16 @@ fn parse_gate_positions_xml(
             Ok(Event::Eof) => break,
             Ok(Event::Start(ref e)) => match e.name().as_ref() {
                 b"macro" => {
+                    macro_depth += 1;
                     let class = attr_value(e, b"class").unwrap_or_default();
                     if class == "zone" {
                         let name = attr_value(e, b"name").unwrap_or_default();
                         current_sector = zone_name_to_sector_macro(&name);
+                        current_zone_off = zone_positions
+                            .get(&name.to_lowercase())
+                            .copied()
+                            .unwrap_or((0.0, 0.0, 0.0));
+                        zone_macro_depth = Some(macro_depth);
                     }
                 }
                 b"connection" if current_sector.is_some() => {
@@ -999,6 +1026,7 @@ fn parse_gate_positions_xml(
                         in_gate_conn = true;
                         gate_pos = (0.0, 0.0, 0.0);
                         gate_rot = (0.0, 0.0, 0.0);
+                        gate_pos_set = false;
                         gate_dest = Some(conn_name);
                     }
                 }
@@ -1006,7 +1034,7 @@ fn parse_gate_positions_xml(
                 _ => {}
             },
             Ok(Event::Empty(ref e)) => {
-                if in_offset {
+                if in_offset && !gate_pos_set {
                     match e.name().as_ref() {
                         b"position" => {
                             gate_pos.0 = attr_value(e, b"x")
@@ -1041,13 +1069,20 @@ fn parse_gate_positions_xml(
                 }
             }
             Ok(Event::End(ref e)) => match e.name().as_ref() {
-                b"offset" => in_offset = false,
+                b"offset" => {
+                    in_offset = false;
+                    // Lock the gate's position after its first offset closes so
+                    // nested prop-macro offsets don't clobber it.
+                    if in_gate_conn {
+                        gate_pos_set = true;
+                    }
+                }
                 b"connection" if in_gate_conn => {
                     if let (Some(sector), Some(dest)) = (&current_sector, gate_dest.take()) {
                         result.entry(sector.clone()).or_default().push((
-                            gate_pos.0 / 1000.0,
-                            gate_pos.1 / 1000.0,
-                            gate_pos.2 / 1000.0,
+                            (gate_pos.0 + current_zone_off.0) / 1000.0,
+                            (gate_pos.1 + current_zone_off.1) / 1000.0,
+                            (gate_pos.2 + current_zone_off.2) / 1000.0,
                             dest,
                             gate_rot,
                         ));
@@ -1055,8 +1090,15 @@ fn parse_gate_positions_xml(
                     in_gate_conn = false;
                 }
                 b"macro" => {
-                    current_sector = None;
-                    in_gate_conn = false;
+                    // Only the zone macro's own close clears the zone context.
+                    // Inner `<macro>` (e.g. gate props) must not reset it.
+                    if zone_macro_depth == Some(macro_depth) {
+                        current_sector = None;
+                        current_zone_off = (0.0, 0.0, 0.0);
+                        zone_macro_depth = None;
+                        in_gate_conn = false;
+                    }
+                    macro_depth = macro_depth.saturating_sub(1);
                 }
                 _ => {}
             },
@@ -1278,6 +1320,83 @@ fn parse_superhighway_zones_xml(xml: &str) -> Vec<(String, f32, f32, f32, String
     result
 }
 
+/// sectors.xml: each `<macro class="sector">` lists `<connection ref="zones">`
+/// entries that place every zone at a sector-relative `<offset><position>` (metres).
+/// Returns `zone_macro_lowercase → (x, y, z) metres`.
+///
+/// Object/gate offsets inside a zone (from zones.xml) are *zone-relative*; adding
+/// the zone's sector position here yields the true sector-relative position.
+fn parse_zone_positions_xml(xml: &str) -> HashMap<String, (f32, f32, f32)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let mut in_sector = false;
+    let mut in_zone_conn = false;
+    let mut in_offset = false;
+    let mut pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
+    let mut zone_macro: Option<String> = None;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                b"macro" => {
+                    if attr_value(e, b"class").as_deref() == Some("sector") {
+                        in_sector = true;
+                    }
+                }
+                b"connection" if in_sector => {
+                    if attr_value(e, b"ref").as_deref() == Some("zones") {
+                        in_zone_conn = true;
+                        pos = (0.0, 0.0, 0.0);
+                        zone_macro = None;
+                    }
+                }
+                b"offset" if in_zone_conn => in_offset = true,
+                _ => {}
+            },
+            Ok(Event::Empty(ref e)) => match e.name().as_ref() {
+                b"position" if in_offset => {
+                    pos.0 = attr_value(e, b"x")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    pos.1 = attr_value(e, b"y")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    pos.2 = attr_value(e, b"z")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                }
+                b"macro" if in_zone_conn => {
+                    zone_macro = attr_value(e, b"ref");
+                }
+                _ => {}
+            },
+            Ok(Event::End(ref e)) => match e.name().as_ref() {
+                b"offset" => in_offset = false,
+                b"connection" if in_zone_conn => {
+                    if let Some(zm) = zone_macro.take() {
+                        result.insert(zm.to_lowercase(), pos);
+                    }
+                    in_zone_conn = false;
+                }
+                b"macro" if in_sector => {
+                    // Closing the sector macro (zone macros emit Empty `<macro ref/>`,
+                    // so a Start/End `macro` pair here is the sector wrapper).
+                    in_sector = false;
+                    in_zone_conn = false;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
+}
+
 /// god.xml: fixed object placements.
 /// Returns (sector_macro_lowercase, x_km, y_km, z_km, kind, display_name, raw_macro_ref).
 fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, String, String)> {
@@ -1373,6 +1492,7 @@ fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
 /// Picks up `ref="object"` connections in zone macros and classifies by macro ref name.
 fn parse_non_gate_objects_xml(
     xml: &str,
+    zone_positions: &HashMap<String, (f32, f32, f32)>,
 ) -> HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1380,6 +1500,8 @@ fn parse_non_gate_objects_xml(
     let mut result: HashMap<String, Vec<(f32, f32, f32, StaticObjectKind, String, String)>> =
         HashMap::new();
     let mut current_sector: Option<String> = None;
+    // Sector-relative offset of the current zone (metres); object offsets are zone-relative.
+    let mut current_zone_off: (f32, f32, f32) = (0.0, 0.0, 0.0);
     let mut in_object_conn = false;
     let mut in_offset = false;
     let mut obj_pos: (f32, f32, f32) = (0.0, 0.0, 0.0);
@@ -1395,6 +1517,10 @@ fn parse_non_gate_objects_xml(
                     if class == "zone" {
                         let name = attr_value(e, b"name").unwrap_or_default();
                         current_sector = zone_name_to_sector_macro(&name);
+                        current_zone_off = zone_positions
+                            .get(&name.to_lowercase())
+                            .copied()
+                            .unwrap_or((0.0, 0.0, 0.0));
                     }
                 }
                 b"connection" if current_sector.is_some() => {
@@ -1435,9 +1561,9 @@ fn parse_non_gate_objects_xml(
                         let kind = classify_static_object(&macro_ref);
                         let name = macro_to_display_name(&macro_ref);
                         result.entry(sector.clone()).or_default().push((
-                            obj_pos.0 / 1000.0,
-                            obj_pos.1 / 1000.0,
-                            obj_pos.2 / 1000.0,
+                            (obj_pos.0 + current_zone_off.0) / 1000.0,
+                            (obj_pos.1 + current_zone_off.1) / 1000.0,
+                            (obj_pos.2 + current_zone_off.2) / 1000.0,
                             kind,
                             name,
                             macro_ref,
@@ -1459,12 +1585,23 @@ fn parse_non_gate_objects_xml(
 }
 
 /// `connection_ClusterGate001To004` → `(1, 4)`
+/// `connection_ClusterGate031To601b` → `(31, 601)`. A cluster token may carry a
+/// trailing letter (`601b`) when a sector has more than one gate to the same
+/// destination cluster — the letter just disambiguates the gate, so parse the
+/// leading digits and ignore it. Dropping such gates is why multi-gate sectors
+/// (e.g. Heretic's End → 3 gates) previously showed too few.
 fn parse_gate_cluster_nums(name: &str) -> Option<(u32, u32)> {
     let inner = name.strip_prefix("connection_ClusterGate")?;
     let sep = inner.find("To")?;
-    let from: u32 = inner[..sep].parse().ok()?;
-    let to: u32 = inner[sep + 2..].parse().ok()?;
+    let from = leading_digits_u32(&inner[..sep])?;
+    let to = leading_digits_u32(&inner[sep + 2..])?;
     Some((from, to))
+}
+
+/// Parse the leading ASCII-digit run of `s` (e.g. `"601b"` → `601`, `"031"` → `31`).
+fn leading_digits_u32(s: &str) -> Option<u32> {
+    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
 }
 
 /// Derive (page_id=20004, text_id) from macro name pattern `Cluster_N_SectorM_macro`.
@@ -1712,6 +1849,7 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         available_locales: Vec::new(),
         current_locale: 44,
         macro_identifications: HashMap::new(),
+        zone_positions: HashMap::new(),
     })
 }
 

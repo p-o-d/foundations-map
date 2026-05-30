@@ -14,6 +14,7 @@ use super::types::EntityRecord;
 pub fn merge(
     batches: Vec<Vec<EntityRecord>>,
     sector_macros: Option<&HashMap<String, SectorId>>,
+    zone_positions: &HashMap<String, (f32, f32, f32)>,
     faction_strings: &mut HashMap<String, FactionId>,
     next_faction_id: &mut u32,
 ) -> World {
@@ -39,12 +40,23 @@ pub fn merge(
             let trade_offers = r.trade_offers;
             let display_name_ref = r.display_name_ref;
             let production_module_macro = r.production_module_macro;
+            // Add the enclosing zone's sector-relative position (km) so live
+            // objects share the same frame as static gates. Named static zones
+            // carry a zero save offset and get their position from here; dynamic
+            // zones (e.g. tempzone) carry their offset in `r.position` already
+            // and are absent from `zone_positions`, so this adds nothing.
+            let zone_off = r
+                .zone_macro
+                .as_ref()
+                .and_then(|z| zone_positions.get(z))
+                .map(|(x, y, z)| glam::Vec3::new(x / 1000.0, y / 1000.0, z / 1000.0))
+                .unwrap_or(glam::Vec3::ZERO);
             world.insert_entity(
                 entity_id,
                 r.macro_name,
                 r.kind,
                 faction,
-                r.position,
+                r.position + zone_off,
                 sec_id,
                 r.parent_id,
                 r.code,
@@ -86,6 +98,7 @@ mod tests {
                 owner: Some("argon".into()),
                 position: glam::Vec3::ZERO,
                 sector_macro: "sa".into(),
+                zone_macro: None,
                 trade_offers: vec![],
                 display_name_ref: None,
                 production_module_macro: None,
@@ -99,6 +112,7 @@ mod tests {
                 owner: Some("argon".into()),
                 position: glam::Vec3::ZERO,
                 sector_macro: "sa".into(),
+                zone_macro: None,
                 trade_offers: vec![],
                 display_name_ref: None,
                 production_module_macro: None,
@@ -108,7 +122,8 @@ mod tests {
         sm.insert("sa".into(), SectorId(1));
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut next = 1u32;
-        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        let zp = HashMap::new();
+        let world = merge(vec![records], Some(&sm), &zp, &mut fs, &mut next);
         assert_eq!(world.names.len(), 2);
         assert_eq!(world.parent_of(0x11), Some(0x10));
         assert_eq!(world.children_of(0x10), &[0x11]);
@@ -128,6 +143,7 @@ mod tests {
             owner: None,
             position: glam::Vec3::ZERO,
             sector_macro: "unknown".into(),
+            zone_macro: None,
             trade_offers: vec![],
             display_name_ref: None,
             production_module_macro: None,
@@ -135,7 +151,8 @@ mod tests {
         let sm: HashMap<String, SectorId> = HashMap::new();
         let mut fs = HashMap::new();
         let mut next = 1u32;
-        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        let zp = HashMap::new();
+        let world = merge(vec![records], Some(&sm), &zp, &mut fs, &mut next);
         assert!(world.names.is_empty());
     }
 
@@ -150,13 +167,15 @@ mod tests {
             owner: None,
             position: glam::Vec3::ZERO,
             sector_macro: "anything".into(),
+            zone_macro: None,
             trade_offers: vec![],
             display_name_ref: None,
             production_module_macro: None,
         }];
         let mut fs = HashMap::new();
         let mut next = 1u32;
-        let world = merge(vec![records], None, &mut fs, &mut next);
+        let zp = HashMap::new();
+        let world = merge(vec![records], None, &zp, &mut fs, &mut next);
         assert!(world.names.is_empty());
     }
 
@@ -172,6 +191,7 @@ mod tests {
             owner: Some("argon".into()),
             position: glam::Vec3::ZERO,
             sector_macro: "sa".into(),
+            zone_macro: None,
             trade_offers: vec![TradeOffer {
                 ware_id: "energycells".into(),
                 direction: TradeDirection::Buy,
@@ -186,7 +206,8 @@ mod tests {
         sm.insert("sa".into(), SectorId(1));
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut next = 1u32;
-        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        let zp = HashMap::new();
+        let world = merge(vec![records], Some(&sm), &zp, &mut fs, &mut next);
         let offers = world.trade_offers_of(0x10);
         assert_eq!(offers.len(), 1);
         assert_eq!(offers[0].ware_id, "energycells");
@@ -204,6 +225,7 @@ mod tests {
             owner: Some("freesplit".into()),
             position: glam::Vec3::ZERO,
             sector_macro: "sa".into(),
+            zone_macro: None,
             trade_offers: vec![],
             display_name_ref: None,
             production_module_macro: Some("prod_gen_microchips_macro".into()),
@@ -212,7 +234,8 @@ mod tests {
         sm.insert("sa".into(), SectorId(1));
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut next = 1u32;
-        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        let zp = HashMap::new();
+        let world = merge(vec![records], Some(&sm), &zp, &mut fs, &mut next);
         assert_eq!(
             world.production_modules.get(&0x77).map(String::as_str),
             Some("prod_gen_microchips_macro")
@@ -230,6 +253,7 @@ mod tests {
             owner: Some("alliance".into()),
             position: glam::Vec3::ZERO,
             sector_macro: "sa".into(),
+            zone_macro: None,
             trade_offers: vec![],
             display_name_ref: Some("{20101,122701}".into()),
             production_module_macro: None,
@@ -238,7 +262,8 @@ mod tests {
         sm.insert("sa".into(), SectorId(1));
         let mut fs: HashMap<String, FactionId> = HashMap::new();
         let mut next = 1u32;
-        let world = merge(vec![records], Some(&sm), &mut fs, &mut next);
+        let zp = HashMap::new();
+        let world = merge(vec![records], Some(&sm), &zp, &mut fs, &mut next);
         assert_eq!(
             world.display_name_refs.get(&0x55).map(String::as_str),
             Some("{20101,122701}")

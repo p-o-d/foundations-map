@@ -23,6 +23,9 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
 
     let mut comp_depth: u32 = 0;
     let mut stack: Vec<Pending> = Vec::new();
+    // One frame per *open* component (zone, station, ship, …) regardless of class.
+    // Lets us sum the full offset chain and find the enclosing zone for an entity.
+    let mut comp_stack: Vec<CompFrame> = Vec::new();
     // Depth at which we are currently inside an <offset> element; None otherwise.
     let mut offset_depth: Option<u32> = None;
     // True while inside an `<offers>` element. `<trade>` elements inside this
@@ -36,6 +39,15 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"component" => {
                 comp_depth += 1;
+                let zone_macro = if attr_str(e, b"class").as_deref() == Some("zone") {
+                    attr_str(e, b"macro").map(|m| m.to_lowercase())
+                } else {
+                    None
+                };
+                comp_stack.push(CompFrame {
+                    offset: None,
+                    zone_macro,
+                });
                 if let Some(p) = build_pending(e, comp_depth, stack.last().map(|sp| sp.id)) {
                     stack.push(p);
                 }
@@ -44,6 +56,24 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                 if let Some(top) = stack.last() {
                     if top.open_depth == comp_depth {
                         let mut p = stack.pop().unwrap();
+                        // Position relative to the enclosing zone = sum of offsets
+                        // from that zone frame down to this entity. We stop at the
+                        // zone (do NOT include the sector/cluster offset above it):
+                        // the zone's *sector*-relative position is added later from
+                        // the static `zone_positions` table. If there is no zone
+                        // ancestor, fall back to the entity's own offset only.
+                        let zone_idx = comp_stack.iter().rposition(|c| c.zone_macro.is_some());
+                        let position = match zone_idx {
+                            Some(i) => comp_stack[i..]
+                                .iter()
+                                .filter_map(|c| c.offset)
+                                .fold(Vec3::ZERO, |a, b| a + b),
+                            None => comp_stack
+                                .last()
+                                .and_then(|c| c.offset)
+                                .unwrap_or(Vec3::ZERO),
+                        };
+                        let zone_macro = zone_idx.and_then(|i| comp_stack[i].zone_macro.clone());
                         out.push(EntityRecord {
                             id: p.id,
                             parent_id: p.parent_id,
@@ -51,14 +81,16 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                             code: p.code,
                             kind: p.kind,
                             owner: p.owner,
-                            position: p.position.unwrap_or(Vec3::ZERO),
+                            position,
                             sector_macro: sector_macro.to_string(),
+                            zone_macro,
                             trade_offers: std::mem::take(&mut p.trade_offers),
                             display_name_ref: p.display_name_ref.take(),
                             production_module_macro: p.production_module_macro.take(),
                         });
                     }
                 }
+                comp_stack.pop();
                 comp_depth = comp_depth.saturating_sub(1);
             }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"offset" => {
@@ -108,17 +140,18 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                 }
             }
             Ok(Event::Empty(ref e)) if e.name().as_ref() == b"position" => {
-                // Only attribute position to the top pending entity if THIS <offset> sits
-                // immediately inside it (open_depth == offset_depth, since <offset> is a
-                // non-component child at the same comp_depth as its parent component).
-                // Prevents a nested child's <offset> from overwriting its parent's position.
-                if let (Some(top), Some(od)) = (stack.last_mut(), offset_depth) {
-                    if top.open_depth == od && top.position.is_none() {
+                // Attribute this <position> to the component currently being parsed,
+                // but only if the enclosing <offset> sits immediately inside it
+                // (offset_depth == comp_depth). First position wins — entities may
+                // carry several offset blocks (predicted/render); the first is the
+                // authoritative one.
+                if let (Some(frame), Some(od)) = (comp_stack.last_mut(), offset_depth) {
+                    if od == comp_depth && frame.offset.is_none() {
                         let x = attr_f32(e, b"x").unwrap_or(0.0);
                         let y = attr_f32(e, b"y").unwrap_or(0.0);
                         let z = attr_f32(e, b"z").unwrap_or(0.0);
                         // X4 stores positions in metres; convert to km.
-                        top.position = Some(Vec3::new(x / 1000.0, y / 1000.0, z / 1000.0));
+                        frame.offset = Some(Vec3::new(x / 1000.0, y / 1000.0, z / 1000.0));
                     }
                 }
             }
@@ -148,10 +181,17 @@ struct Pending {
     code: Option<String>,
     kind: LiveObjectKind,
     owner: Option<String>,
-    position: Option<Vec3>,
     trade_offers: Vec<TradeOffer>,
     display_name_ref: Option<String>,
     production_module_macro: Option<String>,
+}
+
+/// One open `<component>` while parsing. Tracks its own `<offset>` (km) and, if
+/// it is a zone, its macro — so an entity can sum the offset chain and find its
+/// enclosing zone.
+struct CompFrame {
+    offset: Option<Vec3>,
+    zone_macro: Option<String>,
 }
 
 fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Option<Pending> {
@@ -183,7 +223,6 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         code,
         kind,
         owner,
-        position: None,
         trade_offers: Vec::new(),
         display_name_ref,
         production_module_macro: None,

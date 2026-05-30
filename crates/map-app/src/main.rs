@@ -36,16 +36,18 @@ fn main() -> eframe::Result<()> {
     // without blocking on ~300 MB of XML decompression.
     let (snapshot_tx, snapshot_rx) = mpsc::channel::<SnapshotMessage>();
     let sector_macros = universe.sector_macros.clone();
+    let zone_positions = universe.zone_positions.clone();
     let faction_strings = universe.faction_strings.clone();
     let next_faction_id: u32 = (universe.faction_strings.len() as u32) + 1;
     let initial_tx = snapshot_tx.clone();
     let fs_init = faction_strings.clone();
     let nx_init = next_faction_id;
+    let zone_positions_init = zone_positions.clone();
     std::thread::spawn(move || {
         let mut fs = fs_init;
         let mut nx = nx_init;
-        let msg =
-            parse_latest_save(&sector_macros, &mut fs, &mut nx).unwrap_or(SnapshotMessage::None);
+        let msg = parse_latest_save(&sector_macros, &zone_positions_init, &mut fs, &mut nx)
+            .unwrap_or(SnapshotMessage::None);
         let _ = initial_tx.send(msg);
     });
 
@@ -58,6 +60,7 @@ fn main() -> eframe::Result<()> {
                 eprintln!("[map] Watching save dir: {:?}", dir);
                 let parse_tx = snapshot_tx.clone();
                 let sector_macros = universe.sector_macros.clone();
+                let zone_positions_w = zone_positions.clone();
                 let faction_strings_w = faction_strings.clone();
                 let next_faction_id_w = next_faction_id;
                 std::thread::spawn(move || {
@@ -68,6 +71,7 @@ fn main() -> eframe::Result<()> {
                                 spawn_save_parse(
                                     parse_tx.clone(),
                                     sector_macros.clone(),
+                                    zone_positions_w.clone(),
                                     faction_strings_w.clone(),
                                     next_faction_id_w,
                                 );
@@ -201,6 +205,7 @@ fn find_latest_save() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
 /// `SnapshotMessage::Error`.
 pub fn parse_latest_save(
     sector_macros: &HashMap<String, SectorId>,
+    zone_positions: &HashMap<String, (f32, f32, f32)>,
     faction_strings: &mut HashMap<String, FactionId>,
     next_faction_id: &mut u32,
 ) -> Option<SnapshotMessage> {
@@ -209,6 +214,7 @@ pub fn parse_latest_save(
     match map_io::save_parser::parse_save(
         &path,
         Some(sector_macros),
+        zone_positions,
         faction_strings,
         next_faction_id,
     ) {
@@ -272,14 +278,20 @@ pub fn apply_faction_overrides(universe: &mut Universe, overrides: &FactionOverr
 pub fn spawn_save_parse(
     tx: mpsc::Sender<SnapshotMessage>,
     sector_macros: HashMap<String, SectorId>,
+    zone_positions: HashMap<String, (f32, f32, f32)>,
     mut faction_strings: HashMap<String, FactionId>,
     mut next_faction_id: u32,
 ) {
     // Notify UI before parsing so it can show the loading state immediately.
     let _ = tx.send(SnapshotMessage::Loading);
     std::thread::spawn(move || {
-        let msg = parse_latest_save(&sector_macros, &mut faction_strings, &mut next_faction_id)
-            .unwrap_or(SnapshotMessage::None);
+        let msg = parse_latest_save(
+            &sector_macros,
+            &zone_positions,
+            &mut faction_strings,
+            &mut next_faction_id,
+        )
+        .unwrap_or(SnapshotMessage::None);
         let _ = tx.send(msg);
     });
 }
