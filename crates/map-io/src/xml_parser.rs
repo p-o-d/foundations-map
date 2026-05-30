@@ -6,6 +6,7 @@ use std::path::Path;
 use glam::{Vec2, Vec3};
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use rayon::prelude::*;
 
 use map_domain::ids::{ClusterId, FactionId, ObjectId, SectorId};
 use map_domain::objects::{StaticObject, StaticObjectKind};
@@ -124,28 +125,37 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
             macro_index.entry(k).or_insert(v);
         }
     }
-    let mut macro_identifications: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    for (macro_name, path) in &macro_index {
-        // Restrict to ship + station macro files. Filter by asset PATH rather
-        // than macro-name prefix so entries like landmarks_* (class="station"
-        // but no `station_` prefix) are still picked up.
-        if !(path.starts_with("assets/units/")
-            || path.starts_with("assets/structures/")
-            || path.starts_with("assets/environments/"))
-        {
-            continue;
-        }
-        let Some(macro_xml) = crate::cat_reader::read_game_file(game_dir, path) else {
-            continue;
-        };
-        if let Some(ref_str) = crate::macro_identification::parse_macro_identification(&macro_xml) {
-            macro_identifications.insert(macro_name.clone(), ref_str);
-        }
-    }
+    // Read each ship/station/environment macro file and extract its
+    // `<identification>` ref. Each read used to re-scan every cat index from
+    // scratch (O(macros × archives × lines)); instead fetch all needed files in
+    // one parallel archive pass, then parse them in parallel.
+    //
+    // Restrict to ship + station macro files. Filter by asset PATH rather than
+    // macro-name prefix so entries like landmarks_* (class="station" but no
+    // `station_` prefix) are still picked up.
+    let t_macro_id = std::time::Instant::now();
+    let wanted_macro_files: std::collections::HashSet<String> = macro_index
+        .values()
+        .filter(|path| {
+            path.starts_with("assets/units/")
+                || path.starts_with("assets/structures/")
+                || path.starts_with("assets/environments/")
+        })
+        .cloned()
+        .collect();
+    let macro_files = crate::cat_reader::read_files(game_dir, &wanted_macro_files);
+    let macro_identifications: std::collections::HashMap<String, String> = macro_index
+        .par_iter()
+        .filter_map(|(macro_name, path)| {
+            let macro_xml = macro_files.get(path)?;
+            let ref_str = crate::macro_identification::parse_macro_identification(macro_xml)?;
+            Some((macro_name.clone(), ref_str))
+        })
+        .collect();
     eprintln!(
-        "[map] Macro identifications: {}",
-        macro_identifications.len()
+        "[map] Macro identifications: {} ({} ms)",
+        macro_identifications.len(),
+        t_macro_id.elapsed().as_millis(),
     );
 
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
