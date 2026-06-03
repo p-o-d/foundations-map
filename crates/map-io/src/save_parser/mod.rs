@@ -93,6 +93,11 @@ pub fn parse_save(
         "[parse] stage1+2={}ms stage3={}ms stage4={}ms total={}ms chunks={} entities={}",
         stage12_ms, stage3_ms, stage4_ms, total_ms, chunk_count, entity_count
     );
+    eprintln!(
+        "[parse] wharfs={} shipyards={}",
+        world.wharf_stations.len(),
+        world.shipyard_stations.len()
+    );
 
     Ok((scan_out.meta, world, scan_out.overrides))
 }

@@ -43,7 +43,7 @@ crates/
 | `sectors.xml` | `parse_superhighway_zones_xml` | SHCon zone positions (one per superhighway endpoint) |
 
 Plus single-path reads (via `read_all_game_files` for DLC merge):
-- `libraries/mapdefaults.xml` — `(macro → (pageId, textId))` for sector + cluster names
+- `libraries/mapdefaults.xml` — `(macro → (pageId, textId))` for sector + cluster names; also `<resourceareas>` per sector → `Universe.sector_resources` (drives Resources filter)
 - `t/0001-l044.xml` — translation table; pages **20003** (cluster names) and **20004** (sector names)
 - `libraries/god.xml` — fixed `<object>` placements (wormholes, landmarks, debris); `<station>` entries skipped (live stations come from save snapshot instead)
 - `libraries/factions.xml` + `libraries/colors.xml` parsed to populate `Universe.faction_table: HashMap<FactionId, FactionMeta { display_name, color: [u8;4] }>` — drives panel labels + GPU tints
@@ -137,9 +137,30 @@ pub struct StaticObject {
 | 1 — 2D Universe Map | ✅ done | DLC sectors, faction-colored hexes, connections, clusters |
 | 2 — 3D Sector View | ✅ done + bonus | Gates as 2D overlays, stations from god.xml, full property panel |
 | 3 — Live Data | ✅ done | Save-game XML snapshot parsed in background; auto-reload via notify watcher; live ships in 3D + per-sector counts on 2D |
-| 4 — Search + Polish | ⏸ later | Search index over 144 sectors + 743 static objects |
+| 4 — Search + Filters | 🚧 in progress | Map filter modes done (below). Text search over sectors + static objects still pending. |
 
 2026-05-18: Phase 3 polish — live ships + stations rendered via GPU pipeline, hierarchical side panel with parent/child nav, in-game faction colours + names, dropped redundant god.xml stations, captured nested entities. See `docs/superpowers/specs/2026-05-18-station-fixes-design.md`.
+
+## Map Filters (`map-domain::filter`)
+
+Top-bar "Filter" dropdown switches the 2D map between modes (`MapFilterMode`:
+Normal / Wharfs / Shipyards / Resources / Free ships). In a non-Normal mode,
+sectors that don't match are greyed (`RGBA(70,70,75,60)`); matching sectors keep
+their faction colour and show a hover tooltip listing the matched items.
+
+`filter::matched_sectors(mode, universe, world) -> HashMap<SectorId, Vec<FilterHit>>`
+is pure; the app resolves names/codes/faction for the tooltip. Data sources:
+
+| Mode | Source | Tooltip |
+|---|---|---|
+| Wharfs / Shipyards | `World.wharf_stations` / `shipyard_stations` — set in the save parser when a station carries a `buildmodule_*_ships_s/m` (wharf) or `_ships_l/xl`/`_carrier` (shipyard) module; Xenon shipyard matched by station macro | station name · in-game code · faction |
+| Free ships | live ship entities whose owner faction is `ownerless` | ship name · in-game code |
+| Resources | `Universe.sector_resources`, parsed from mapdefaults `<resourceareas>` (`sphere_<size>_<ware>_<tier>_<speed>`); see `parse_resource_areas_xml`. `combine_resources` merges same-ware areas → richest tier + summed area count | ware · tier · amount |
+
+Resource "amount" = number of resource areas of that ware; tier = richest band
+(`ResourceTier` VeryLow…VeryHigh). Per-ware yield tonnage (`regionyields.xml`) is
+a possible later refinement. The top-bar `search_text` box stays unwired — text
+search is the next Phase 4 slice.
 
 ## Conventions
 

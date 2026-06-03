@@ -5,6 +5,10 @@ use glam::Vec2;
 #[derive(Debug, Clone)]
 pub struct FactionMeta {
     pub display_name: String,
+    /// Abbreviated faction name (e.g. "ARG" for Argon), from `factions.xml`
+    /// `shortname=`. Prefixes generated object names in-game ("ARG Solar Power
+    /// Plant I"). Empty when the faction has no shortname.
+    pub short_name: String,
     pub color: [u8; 4],
 }
 
@@ -60,6 +64,20 @@ pub struct Universe {
     /// Lowercase ware id (e.g. "energycells") → display name (e.g. "Energy Cells").
     /// Built once at galaxy load from `libraries/wares.xml`. Empty if parse failed.
     pub ware_names: std::collections::HashMap<String, String>,
+    /// Lowercase ware id → station/factory display name from `wares.xml`
+    /// `factoryname=` (e.g. "energycells" → "Solar Power Plant"). This is the
+    /// name the game shows for an NPC factory producing that ware, distinct from
+    /// the ware name itself. Empty if absent.
+    pub ware_factory_names: std::collections::HashMap<String, String>,
+    /// Lowercase production-module macro → the ware it produces (e.g.
+    /// "prod_gen_energycells_macro" → "energycells"), from each module macro's
+    /// `<production wares="..."/>`. Lets a station resolve its factory name via
+    /// [`ware_factory_names`].
+    pub prod_module_wares: std::collections::HashMap<String, String>,
+    /// Lowercase job id (e.g. "argon_construction_vessel_xl_focused") → resolved
+    /// job display name (e.g. "Builder Ship"), from `libraries/jobs.xml`
+    /// `<job name="{p,t}"/>`. NPC ships are prefixed in-game with their job name.
+    pub job_names: std::collections::HashMap<String, String>,
     /// Full translation table: (page_id, text_id) -> display string. Populated at
     /// galaxy load from `t/0001-l<locale>.xml`. Consumed by the entity-label
     /// resolver and the ware-name lookup.
@@ -79,6 +97,11 @@ pub struct Universe {
     /// position here yields the true sector-relative position. Used by the save
     /// parser to place live ships/stations consistently with static gates.
     pub zone_positions: std::collections::HashMap<String, (f32, f32, f32)>,
+    /// Per-sector mineable resource areas, parsed from mapdefaults
+    /// `<resourceareas>`. Drives the "Resources" map filter. Empty/missing for
+    /// sectors with no yields.
+    pub sector_resources:
+        std::collections::HashMap<SectorId, Vec<crate::resources::SectorResource>>,
 }
 
 impl Universe {
@@ -114,11 +137,15 @@ mod tests {
             faction_strings: HashMap::new(),
             faction_table: HashMap::new(),
             ware_names: HashMap::new(),
+            ware_factory_names: HashMap::new(),
+            prod_module_wares: HashMap::new(),
+            job_names: HashMap::new(),
             translations: HashMap::new(),
             available_locales: Vec::new(),
             current_locale: 0,
             macro_identifications: HashMap::new(),
             zone_positions: HashMap::new(),
+            sector_resources: HashMap::new(),
             sectors: vec![
                 Sector {
                     id: a,
@@ -180,6 +207,7 @@ mod tests {
             FactionId(1),
             FactionMeta {
                 display_name: "Argon Federation".into(),
+                short_name: "ARG".into(),
                 color: [50, 120, 255, 255],
             },
         );

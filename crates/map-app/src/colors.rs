@@ -75,14 +75,130 @@ fn resolve_class_name(
     None
 }
 
+/// Convert 1-based `n` to a Roman numeral (e.g. 1 → "I", 4 → "IV"). The game
+/// renders an object's `nameindex` this way ("Solar Power Plant I"). Returns
+/// `None` for 0 or values past the conventional 3999 ceiling.
+fn roman(mut n: u32) -> Option<String> {
+    if n == 0 || n > 3999 {
+        return None;
+    }
+    const TABLE: &[(u32, &str)] = &[
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut out = String::new();
+    for &(v, s) in TABLE {
+        while n >= v {
+            out.push_str(s);
+            n -= v;
+        }
+    }
+    Some(out)
+}
+
+/// For a station, resolve the factory name the game derives from its primary
+/// production ware: production-module macro → ware id → `wares.xml`
+/// `factoryname` (e.g. "Solar Power Plant"). `None` when the station has no
+/// tracked production module or the ware lacks a factory name.
+fn station_factory_name(
+    world: &map_domain::world::World,
+    universe: &map_domain::universe::Universe,
+    eid: map_domain::world::EntityId,
+) -> Option<String> {
+    let prod_macro = world.production_modules.get(&eid)?;
+    let ware = universe.prod_module_wares.get(prod_macro)?;
+    universe.ware_factory_names.get(ware).cloned()
+}
+
+/// Compose the full label minus the trailing `(CODE)`. Mirrors the game's
+/// generated names:
+///   - Player-renamed entities (literal `name=`): the custom name verbatim.
+///   - Stations: `{faction short} {factory name | class name} {roman(nameindex)}`.
+///   - Ships:    `{faction short} {job name} {class name (incl. variation)} {roman}`.
+/// Empty pieces are dropped; falls back to the raw macro if nothing resolves.
+fn compose_body(
+    world: &map_domain::world::World,
+    universe: &map_domain::universe::Universe,
+    eid: map_domain::world::EntityId,
+    macro_name: &str,
+) -> String {
+    // A literal (non-ref) save name is a player-assigned custom name: show it
+    // alone, exactly as the game does.
+    if let Some(raw) = world.display_name_refs.get(&eid) {
+        if !raw.trim_start().starts_with('{') {
+            return raw.clone();
+        }
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    // Owner faction short name ("ARG").
+    if let Some(meta) = world
+        .factions
+        .get(&eid)
+        .and_then(|fid| universe.faction_table.get(fid))
+    {
+        if !meta.short_name.is_empty() {
+            parts.push(meta.short_name.clone());
+        }
+    }
+
+    use map_domain::world::LiveObjectKind;
+    let is_station = matches!(world.kinds.get(&eid), Some(LiveObjectKind::Station));
+
+    if is_station {
+        let body = station_factory_name(world, universe, eid)
+            .or_else(|| resolve_class_name(world, universe, eid, macro_name))
+            .unwrap_or_else(|| strip_macro(macro_name));
+        if !body.is_empty() {
+            parts.push(body);
+        }
+    } else {
+        // Ship job name prefix ("Builder Ship") for NPC, job-spawned ships.
+        if let Some(job) = world
+            .entity_jobs
+            .get(&eid)
+            .and_then(|j| universe.job_names.get(j))
+        {
+            if !job.is_empty() {
+                parts.push(job.clone());
+            }
+        }
+        let body = resolve_class_name(world, universe, eid, macro_name)
+            .unwrap_or_else(|| strip_macro(macro_name));
+        if !body.is_empty() {
+            parts.push(body);
+        }
+    }
+
+    // Trailing roman numeral from the save's `nameindex`.
+    if let Some(r) = world.name_index.get(&eid).copied().and_then(roman) {
+        parts.push(r);
+    }
+
+    let body = parts.join(" ");
+    if body.trim().is_empty() {
+        macro_name.to_string()
+    } else {
+        body
+    }
+}
+
 /// Resolve a human label for one live entity, used by the side panel and
-/// the 3D hover tooltip.
-///
-/// Returns `"Class Name (CODE)"` when both the resolved class name and the
-/// short code are known; falls back to the class name alone, then the code
-/// alone, and finally to `strip_macro(macro_name)` if nothing else is
-/// available. Returns an empty string when the entity id is unknown to the
-/// World.
+/// the 3D hover tooltip. Returns `"<composed name> (CODE)"`, or the composed
+/// name alone when no code is known. Empty string when the entity id is
+/// unknown to the World.
 pub fn resolve_entity_label(
     world: &map_domain::world::World,
     universe: &map_domain::universe::Universe,
@@ -92,25 +208,15 @@ pub fn resolve_entity_label(
         return String::new();
     }
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
-    let class_name = resolve_class_name(world, universe, eid, &macro_name).or_else(|| {
-        let stripped = strip_macro(&macro_name);
-        if stripped.is_empty() {
-            None
-        } else {
-            Some(stripped)
-        }
-    });
-    let code = world.codes.get(&eid).cloned();
-    match (class_name, code) {
-        (Some(c), Some(code)) => format!("{c} ({code})"),
-        (Some(c), None) => c,
-        (None, Some(code)) => code,
-        (None, None) => macro_name,
+    let body = compose_body(world, universe, eid, &macro_name);
+    match world.codes.get(&eid) {
+        Some(code) => format!("{body} ({code})"),
+        None => body,
     }
 }
 
-/// Resolve only the class-name portion of the entity label (no code in parens).
-/// Used by callers that render the code on its own line.
+/// Resolve the composed label without the trailing `(CODE)`. Used by callers
+/// that render the code on its own line.
 pub fn resolve_entity_label_without_code(
     world: &map_domain::world::World,
     universe: &map_domain::universe::Universe,
@@ -120,14 +226,7 @@ pub fn resolve_entity_label_without_code(
         return String::new();
     }
     let macro_name = world.names.get(&eid).cloned().unwrap_or_default();
-    resolve_class_name(world, universe, eid, &macro_name).unwrap_or_else(|| {
-        let stripped = strip_macro(&macro_name);
-        if stripped.is_empty() {
-            macro_name
-        } else {
-            stripped
-        }
-    })
+    compose_body(world, universe, eid, &macro_name)
 }
 
 #[cfg(test)]
@@ -363,5 +462,89 @@ mod tests {
         );
         w.display_name_refs.insert(6, "{20101,30804}".into());
         assert_eq!(resolve_entity_label(&w, &u, 6), "Helios E (XYZ-1)");
+    }
+
+    #[test]
+    fn roman_numerals_basic() {
+        assert_eq!(roman(1).as_deref(), Some("I"));
+        assert_eq!(roman(4).as_deref(), Some("IV"));
+        assert_eq!(roman(9).as_deref(), Some("IX"));
+        assert_eq!(roman(14).as_deref(), Some("XIV"));
+        assert_eq!(roman(0), None);
+        assert_eq!(roman(4000), None);
+    }
+
+    /// Argon faction with a short name, used for the prefix tests.
+    fn universe_with_argon() -> Universe {
+        let mut u = sample_universe();
+        u.faction_table.insert(
+            FactionId(1),
+            map_domain::universe::FactionMeta {
+                display_name: "Argon Federation".into(),
+                short_name: "ARG".into(),
+                color: [0, 0, 0, 255],
+            },
+        );
+        u
+    }
+
+    #[test]
+    fn ship_label_has_faction_short_and_job_prefix() {
+        let mut u = universe_with_argon();
+        u.job_names.insert(
+            "argon_construction_vessel_xl_focused".into(),
+            "Builder Ship".into(),
+        );
+        // Mammoth builder: macro identification resolves "Helios E" here (reusing
+        // the sample ref) — we only assert the prefix composition.
+        let mut w = sample_world();
+        // Entity 1 is an Argon ship (faction 1) with ref name "Cerberus Vanguard".
+        w.entity_jobs
+            .insert(1, "argon_construction_vessel_xl_focused".into());
+        assert_eq!(
+            resolve_entity_label(&w, &u, 1),
+            "ARG Builder Ship Cerberus Vanguard (AKV-484)"
+        );
+    }
+
+    #[test]
+    fn station_label_uses_factory_name_short_and_roman() {
+        let mut u = universe_with_argon();
+        // energycells → "Solar Power Plant" factory name.
+        u.prod_module_wares
+            .insert("prod_gen_energycells_macro".into(), "energycells".into());
+        u.ware_factory_names
+            .insert("energycells".into(), "Solar Power Plant".into());
+        let mut w = sample_world();
+        // Entity 8: Argon station with an energy production module, nameindex 1.
+        w.insert_entity(
+            8,
+            "station_gen_factory_base_01_macro".into(),
+            LiveObjectKind::Station,
+            Some(FactionId(1)),
+            glam::Vec3::ZERO,
+            SectorId(1),
+            None,
+            Some("BPF-030".into()),
+        );
+        w.production_modules
+            .insert(8, "prod_gen_energycells_macro".into());
+        w.name_index.insert(8, 1);
+        assert_eq!(
+            resolve_entity_label(&w, &u, 8),
+            "ARG Solar Power Plant I (BPF-030)"
+        );
+    }
+
+    #[test]
+    fn player_renamed_literal_skips_composition() {
+        let mut u = universe_with_argon();
+        u.job_names.insert("somejob".into(), "Some Job".into());
+        let mut w = sample_world();
+        // Entity 2 has a literal name "My Best Ship"; even with faction + job set,
+        // the custom name is shown verbatim.
+        w.factions.insert(2, FactionId(1));
+        w.entity_jobs.insert(2, "somejob".into());
+        assert_eq!(resolve_entity_label(&w, &u, 2), "My Best Ship (MBS-001)");
     }
 }

@@ -95,9 +95,18 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     );
 
     let mut name_refs = HashMap::new();
+    // sector macro (lowercase) → mineable resource areas, from `<resourceareas>`.
+    let mut resource_areas_by_macro: HashMap<String, Vec<map_domain::resources::SectorResource>> =
+        HashMap::new();
     for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/mapdefaults.xml") {
         let s = String::from_utf8_lossy(&data);
         name_refs.extend(parse_sector_name_refs_xml(&s)?);
+        for (macro_lc, areas) in parse_resource_areas_xml(&s) {
+            resource_areas_by_macro
+                .entry(macro_lc)
+                .or_default()
+                .extend(areas);
+        }
     }
     let translations = parse_translations_xml(&translations_str)?;
 
@@ -107,12 +116,31 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     // (same convention as factions / colors).
     let mut ware_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    let mut ware_factory_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/wares.xml") {
         for (k, v) in parse_ware_names_xml(&data, &translations) {
             ware_names.entry(k).or_insert(v);
         }
+        for (k, v) in parse_ware_factory_names_xml(&data, &translations) {
+            ware_factory_names.entry(k).or_insert(v);
+        }
     }
-    eprintln!("[map] Ware names: {}", ware_names.len());
+    eprintln!(
+        "[map] Ware names: {}, factory names: {}",
+        ware_names.len(),
+        ware_factory_names.len()
+    );
+
+    // Job id → display name (e.g. "Builder Ship"). NPC ships prefix their
+    // generated name with this. Multi-archive read for DLC; first wins.
+    let mut job_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/jobs.xml") {
+        for (k, v) in parse_jobs_xml(&data, &translations) {
+            job_names.entry(k).or_insert(v);
+        }
+    }
+    eprintln!("[map] Job names: {}", job_names.len());
 
     // Macro identifications: for each ship_*/station_* macro, read the macro
     // definition file and extract `<identification name="{p,t}"/>`. Used as a
@@ -157,6 +185,18 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         macro_identifications.len(),
         t_macro_id.elapsed().as_millis(),
     );
+    // Production-module macro → ware it produces (e.g.
+    // "prod_gen_energycells_macro" → "energycells"). Reuses the already-loaded
+    // macro files; only `class="production"` macros carry `<production>`.
+    let prod_module_wares: std::collections::HashMap<String, String> = macro_index
+        .par_iter()
+        .filter_map(|(macro_name, path)| {
+            let macro_xml = macro_files.get(path)?;
+            let ware = crate::xml_parser::parse_macro_production_ware(macro_xml)?;
+            Some((macro_name.to_lowercase(), ware))
+        })
+        .collect();
+    eprintln!("[map] Production-module wares: {}", prod_module_wares.len());
 
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
     let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
@@ -417,12 +457,18 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         {
             for (x, y, z, kind, name, macro_ref) in objects {
                 non_gate_counter += 1;
+                let resolved = resolve_static_object_name(
+                    macro_ref,
+                    &macro_identifications,
+                    &translations,
+                    name,
+                );
                 sector.static_objects.push(StaticObject {
                     id: ObjectId(20_000 + non_gate_counter),
                     kind: kind.clone(),
                     position: Vec3::new(*x, *y, *z),
                     faction: None,
-                    name: name.clone(),
+                    name: resolved,
                     rotation: None,
                     details: vec![("Macro".to_string(), macro_ref.clone())],
                 });
@@ -444,12 +490,18 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
             if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
                 if let Some(sector) = sectors.iter_mut().find(|s| s.id == sec_id) {
                     god_counter += 1;
+                    let resolved = resolve_static_object_name(
+                        &mac,
+                        &macro_identifications,
+                        &translations,
+                        &name,
+                    );
                     sector.static_objects.push(StaticObject {
                         id: ObjectId(30_000 + god_counter),
                         kind,
                         position: Vec3::new(x, y, z),
                         faction: None,
-                        name,
+                        name: resolved,
                         rotation: None,
                         details: vec![("Macro".to_string(), mac)],
                     });
@@ -549,6 +601,17 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
+    // Resolve resource areas (keyed by sector macro) to SectorId.
+    let sector_resources: HashMap<SectorId, Vec<map_domain::resources::SectorResource>> =
+        resource_areas_by_macro
+            .into_iter()
+            .filter_map(|(macro_lc, areas)| sector_macros.get(&macro_lc).map(|&id| (id, areas)))
+            .collect();
+    eprintln!(
+        "[map] Sectors with resources: {} ({} areas)",
+        sector_resources.len(),
+        sector_resources.values().map(Vec::len).sum::<usize>(),
+    );
     let available_locales = crate::game_path::list_available_locales(game_dir);
     let mut universe = Universe {
         sectors,
@@ -558,11 +621,15 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         faction_strings: HashMap::new(),
         faction_table: HashMap::new(),
         ware_names,
+        ware_factory_names,
+        prod_module_wares,
+        job_names,
         translations,
         available_locales,
         current_locale: locale,
         macro_identifications,
         zone_positions,
+        sector_resources,
     };
 
     // Assign sequential FactionIds and populate the faction table.
@@ -578,6 +645,11 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
             .get(&def.name_textref)
             .cloned()
             .unwrap_or_else(|| faction_id_str.clone());
+        let short_name = def
+            .short_name_textref
+            .and_then(|r| universe.translations.get(&r))
+            .cloned()
+            .unwrap_or_default();
         let color = crate::faction_parser::resolve_faction_color(
             &def.color_mapping,
             &colors_map,
@@ -589,6 +661,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
             fid,
             map_domain::universe::FactionMeta {
                 display_name,
+                short_name,
                 color,
             },
         );
@@ -1477,6 +1550,68 @@ fn parse_god_xml(xml: &str) -> Vec<(String, f32, f32, f32, StaticObjectKind, Str
     result
 }
 
+/// mapdefaults.xml: sector dataset macro (lowercase) → mineable resource areas.
+///
+/// Walks `<dataset macro=...><properties><resourceareas><resourcearea amount ref/>`.
+/// Each `ref` is a 5-token `sphere_<size>_<ware>_<tier>_<speed>`; we take the
+/// ware (token 2) and tier (token 3). Refs that don't parse are skipped.
+fn parse_resource_areas_xml(
+    xml: &str,
+) -> HashMap<String, Vec<map_domain::resources::SectorResource>> {
+    use map_domain::resources::SectorResource;
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut result: HashMap<String, Vec<SectorResource>> = HashMap::new();
+    let mut current_macro: Option<String> = None;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"dataset" => {
+                current_macro = attr_value(e, b"macro").map(|m| m.to_lowercase());
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"dataset" => {
+                current_macro = None;
+            }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"resourcearea" =>
+            {
+                if let Some(macro_lc) = &current_macro {
+                    if let Some(area) = parse_resource_area(e) {
+                        result.entry(macro_lc.clone()).or_default().push(area);
+                    }
+                }
+            }
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    result
+}
+
+fn parse_resource_area(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Option<map_domain::resources::SectorResource> {
+    use map_domain::resources::{ResourceTier, SectorResource};
+    let r = attr_value(e, b"ref")?;
+    let parts: Vec<&str> = r.split('_').collect();
+    if parts.len() != 5 || parts[0] != "sphere" {
+        return None;
+    }
+    let tier = ResourceTier::parse(parts[3])?;
+    let amount = attr_value(e, b"amount")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(1);
+    Some(SectorResource {
+        ware: parts[2].to_string(),
+        tier,
+        amount,
+    })
+}
+
 /// Classify a static object by its macro reference name.
 fn classify_static_object(macro_ref: &str) -> StaticObjectKind {
     let lower = macro_ref.to_lowercase();
@@ -1640,6 +1775,25 @@ fn macro_to_display_name(s: &str) -> String {
 /// backslash-paren unescaping in one unified pass.
 fn resolve_display_name(raw: &str, translations: &HashMap<(u32, u32), String>) -> String {
     map_domain::translations::x4_display_name(raw, translations)
+}
+
+/// Resolve a static object's display name from its macro's `<identification>`
+/// ref (e.g. aqueducts, anomalies, landmarks) via `macro_identifications` +
+/// translations. Falls back to `fallback` (the macro-derived string) when the
+/// macro has no identification or the ref doesn't resolve cleanly.
+fn resolve_static_object_name(
+    macro_ref: &str,
+    macro_identifications: &HashMap<String, String>,
+    translations: &HashMap<(u32, u32), String>,
+    fallback: &str,
+) -> String {
+    if let Some(id_ref) = macro_identifications.get(&macro_ref.to_lowercase()) {
+        let display = resolve_display_name(id_ref, translations);
+        if !display.is_empty() && !display.starts_with('{') {
+            return display;
+        }
+    }
+    fallback.to_string()
 }
 
 /// Parse a combined single-file galaxy XML (fixture format used in tests).
@@ -1855,11 +2009,15 @@ fn parse_galaxy_str(xml_str: &str) -> Result<Universe, ParseError> {
         faction_strings: HashMap::new(),
         faction_table: HashMap::new(),
         ware_names: HashMap::new(),
+        ware_factory_names: HashMap::new(),
+        prod_module_wares: HashMap::new(),
+        job_names: HashMap::new(),
         translations: HashMap::new(),
         available_locales: Vec::new(),
         current_locale: 44,
         macro_identifications: HashMap::new(),
         zone_positions: HashMap::new(),
+        sector_resources: HashMap::new(),
     })
 }
 
@@ -2033,9 +2191,150 @@ pub fn parse_ware_names_xml(
     out
 }
 
+/// Parse `libraries/wares.xml` `factoryname=` refs into `ware_id → display name`
+/// (e.g. "energycells" → "Solar Power Plant"). This is the name the game shows
+/// for an NPC factory producing the ware, distinct from the ware's own name.
+/// Wares without a `factoryname` are skipped. Unresolved refs are dropped (the
+/// caller falls back to other naming paths) rather than echoing the raw ware id.
+pub fn parse_ware_factory_names_xml(
+    xml: &[u8],
+    translations: &HashMap<(u32, u32), String>,
+) -> HashMap<String, String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut out: HashMap<String, String> = HashMap::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"ware" => {
+                let Some(id) = attr_value(e, b"id") else {
+                    continue;
+                };
+                let Some(fname) = attr_value(e, b"factoryname") else {
+                    continue;
+                };
+                let display = if let Some((pid, tid)) = parse_page_text_ref(&fname) {
+                    match translations.get(&(pid, tid)) {
+                        Some(raw) => resolve_display_name(raw, translations),
+                        None => continue,
+                    }
+                } else if !fname.is_empty() {
+                    fname
+                } else {
+                    continue;
+                };
+                out.insert(id.to_lowercase(), display);
+            }
+            Ok(Event::Eof) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+/// Parse the ware id produced by a production-module macro file, from its
+/// `<production wares="..."/>` element (e.g. `prod_gen_energycells_macro` →
+/// "energycells"). Returns the first listed ware (modules produce one ware in
+/// practice). `None` if the macro defines no production.
+pub fn parse_macro_production_ware(xml: &[u8]) -> Option<String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
+                if e.name().as_ref() == b"production" =>
+            {
+                if let Some(wares) = attr_value(e, b"wares") {
+                    let first = wares.split([',', ' ']).find(|s| !s.is_empty());
+                    return first.map(|s| s.to_lowercase());
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+/// Parse `libraries/jobs.xml` into `job_id → display name` (e.g.
+/// "argon_construction_vessel_xl_focused" → "Builder Ship"). NPC ships are
+/// prefixed in-game with their job's name. Jobs without a resolvable name are
+/// skipped.
+pub fn parse_jobs_xml(
+    xml: &[u8],
+    translations: &HashMap<(u32, u32), String>,
+) -> HashMap<String, String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut out: HashMap<String, String> = HashMap::new();
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"job" => {
+                let Some(id) = attr_value(e, b"id") else {
+                    continue;
+                };
+                let Some(name_attr) = attr_value(e, b"name") else {
+                    continue;
+                };
+                let display = if let Some((pid, tid)) = parse_page_text_ref(&name_attr) {
+                    match translations.get(&(pid, tid)) {
+                        Some(raw) => resolve_display_name(raw, translations),
+                        None => continue,
+                    }
+                } else if !name_attr.is_empty() {
+                    name_attr
+                } else {
+                    continue;
+                };
+                out.insert(id.to_lowercase(), display);
+            }
+            Ok(Event::Eof) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+
+    #[test]
+    fn parse_resource_areas_extracts_ware_tier_amount() {
+        use map_domain::resources::ResourceTier;
+        let xml = r#"<?xml version="1.0"?>
+<defaults>
+  <dataset macro="Cluster_01_Sector001_macro">
+    <properties>
+      <resourceareas>
+        <resourcearea amount="4" ref="sphere_large_ore_high_slow" />
+        <resourcearea amount="3" ref="sphere_tiny_ore_low_fast" />
+        <resourcearea amount="1" ref="sphere_small_nividium_verylow_slow" />
+        <resourcearea amount="2" ref="garbage_ref" />
+      </resourceareas>
+    </properties>
+  </dataset>
+</defaults>"#;
+        let map = super::parse_resource_areas_xml(xml);
+        let areas = &map["cluster_01_sector001_macro"];
+        // 3 valid areas; the malformed ref is skipped.
+        assert_eq!(areas.len(), 3);
+        assert!(areas.contains(&map_domain::resources::SectorResource {
+            ware: "ore".into(),
+            tier: ResourceTier::High,
+            amount: 4,
+        }));
+        assert!(areas.contains(&map_domain::resources::SectorResource {
+            ware: "nividium".into(),
+            tier: ResourceTier::VeryLow,
+            amount: 1,
+        }));
+    }
 
     #[test]
     fn parse_translations_xml_includes_wares_page_20201() {
@@ -2100,6 +2399,61 @@ mod tests {
         );
         // <missingid> has no `id` attribute — skipped.
         assert!(names.get("missingid").is_none());
+    }
+
+    #[test]
+    fn parse_ware_factory_names_resolves_factoryname_ref() {
+        let xml = br#"<wares>
+            <ware id="energycells" name="{20201,701}" factoryname="{20201,704}"/>
+            <ware id="hullparts" name="{20201,1201}" factoryname="{20201,1204}"/>
+            <ware id="nofactory" name="{20201,9001}"/>
+        </wares>"#;
+        let mut t: HashMap<(u32, u32), String> = HashMap::new();
+        t.insert((20201, 704), "Solar Power Plant".into());
+        t.insert((20201, 1204), "Hull Parts Factory".into());
+        let m = super::parse_ware_factory_names_xml(xml, &t);
+        assert_eq!(
+            m.get("energycells").map(String::as_str),
+            Some("Solar Power Plant")
+        );
+        assert_eq!(
+            m.get("hullparts").map(String::as_str),
+            Some("Hull Parts Factory")
+        );
+        // No factoryname attr → absent (not echoed as ware id).
+        assert!(m.get("nofactory").is_none());
+    }
+
+    #[test]
+    fn parse_macro_production_ware_extracts_first_ware() {
+        let xml = br#"<macros><macro name="prod_gen_energycells_macro" class="production">
+            <properties><identification name="{20104,10801}"/></properties>
+            <production wares="energycells"><queue ware="energycells"/></production>
+        </macro></macros>"#;
+        assert_eq!(
+            super::parse_macro_production_ware(xml).as_deref(),
+            Some("energycells")
+        );
+        // Non-production macro → None.
+        let no_prod = br#"<macros><macro name="x" class="ship_s"><properties/></macro></macros>"#;
+        assert_eq!(super::parse_macro_production_ware(no_prod), None);
+    }
+
+    #[test]
+    fn parse_jobs_resolves_job_name_ref() {
+        let xml = br#"<jobs>
+            <job id="argon_construction_vessel_xl_focused" name="{20204,5101}"/>
+            <job id="noname"/>
+        </jobs>"#;
+        let mut t: HashMap<(u32, u32), String> = HashMap::new();
+        t.insert((20204, 5101), "Builder Ship".into());
+        let m = super::parse_jobs_xml(xml, &t);
+        assert_eq!(
+            m.get("argon_construction_vessel_xl_focused")
+                .map(String::as_str),
+            Some("Builder Ship")
+        );
+        assert!(m.get("noname").is_none());
     }
 
     #[test]

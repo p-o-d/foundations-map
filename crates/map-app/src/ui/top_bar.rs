@@ -1,3 +1,4 @@
+use map_domain::filter::MapFilterMode;
 use map_domain::world::SnapshotMeta;
 
 pub struct TopBar {
@@ -18,6 +19,8 @@ pub struct TopBarResponse {
     /// `Some(new_locale_id)` when the user picked a different locale in the
     /// dropdown this frame; `None` otherwise.
     pub locale_changed_to: Option<u32>,
+    /// `Some(mode)` when the user picked a different map filter this frame.
+    pub filter_changed_to: Option<MapFilterMode>,
 }
 
 impl TopBar {
@@ -28,6 +31,7 @@ impl TopBar {
         loading: bool,
         available_locales: &[u32],
         current_locale: u32,
+        current_filter: MapFilterMode,
     ) -> TopBarResponse {
         let mut resp = TopBarResponse::default();
         ui.horizontal(|ui| {
@@ -36,8 +40,23 @@ impl TopBar {
             ui.add_space(16.0);
             let search = egui::TextEdit::singleline(&mut self.search_text)
                 .hint_text("⌕ Search sectors, stations, ships...")
-                .desired_width(300.0);
+                .desired_width(220.0);
             ui.add(search);
+
+            // Map filter mode.
+            ui.add_space(8.0);
+            ui.label("Filter:");
+            let mut chosen_filter = current_filter;
+            egui::ComboBox::from_id_salt("filter-dropdown")
+                .selected_text(current_filter.label())
+                .show_ui(ui, |ui| {
+                    for mode in MapFilterMode::all() {
+                        ui.selectable_value(&mut chosen_filter, mode, mode.label());
+                    }
+                });
+            if chosen_filter != current_filter {
+                resp.filter_changed_to = Some(chosen_filter);
+            }
 
             ui.add_space(8.0);
             let refresh_enabled = !loading;

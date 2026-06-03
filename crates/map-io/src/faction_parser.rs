@@ -8,6 +8,9 @@ use std::collections::HashMap;
 pub struct FactionDef {
     /// Translation reference: (page_id, text_id).
     pub name_textref: (u32, u32),
+    /// Translation reference for the abbreviated name (`shortname=`), e.g.
+    /// (20203, 203) → "ARG". `None` when the faction has no shortname.
+    pub short_name_textref: Option<(u32, u32)>,
     /// The mapping id used in `libraries/colors.xml`, e.g. "faction_argon".
     pub color_mapping: String,
 }
@@ -26,12 +29,14 @@ fn parse_textref(s: &str) -> Option<(u32, u32)> {
 fn handle_faction(e: &quick_xml::events::BytesStart<'_>, out: &mut HashMap<String, FactionDef>) {
     let mut id_opt: Option<String> = None;
     let mut name_opt: Option<(u32, u32)> = None;
+    let mut short_opt: Option<(u32, u32)> = None;
     for attr in e.attributes().filter_map(Result::ok) {
         let key = attr.key.as_ref();
         let val = String::from_utf8_lossy(&attr.value).into_owned();
         match key {
             b"id" => id_opt = Some(val.to_lowercase()),
             b"name" => name_opt = parse_textref(&val),
+            b"shortname" => short_opt = parse_textref(&val),
             _ => {}
         }
     }
@@ -41,6 +46,7 @@ fn handle_faction(e: &quick_xml::events::BytesStart<'_>, out: &mut HashMap<Strin
             id,
             FactionDef {
                 name_textref: textref,
+                short_name_textref: short_opt,
                 color_mapping,
             },
         );
@@ -161,10 +167,12 @@ mod tests {
         assert_eq!(map.len(), 2);
         let argon = map.get("argon").expect("argon present");
         assert_eq!(argon.name_textref, (20203, 201));
+        assert_eq!(argon.short_name_textref, Some((20203, 203)));
         assert_eq!(argon.color_mapping, "faction_argon");
 
         let teladi = map.get("teladi").expect("teladi present");
         assert_eq!(teladi.name_textref, (20203, 1801));
+        assert_eq!(teladi.short_name_textref, None);
         assert_eq!(teladi.color_mapping, "faction_teladi");
     }
 

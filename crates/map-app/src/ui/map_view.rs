@@ -1,9 +1,11 @@
 use crate::theme;
 use egui::{Pos2, Rect, Response, Sense, Stroke, Vec2};
 use glam::Vec2 as GVec2;
+use map_domain::filter::FilterHit;
 use map_domain::ids::{ClusterId, FactionId, SectorId};
 use map_domain::universe::{GateType, Universe};
 use map_domain::world::World;
+use std::collections::HashMap;
 
 /// Pixel-space layout offset for a sector inside its cluster.
 /// Scales with `r` (which the renderer derives from `hex_r`), so sectors never
@@ -27,6 +29,60 @@ fn hex_offset_pixels(index: u32, total: u32, r: f32) -> Vec2 {
 fn faction_fill(universe: &Universe, id: FactionId) -> egui::Color32 {
     let base = crate::colors::faction_color(universe, id);
     egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 60)
+}
+
+/// Render a filter hover tooltip: the sector name followed by one block per
+/// matched hit. Entity hits (wharf/shipyard/free-ship) show name + in-game code
+/// + faction; resource hits show ware, tier and combined amount.
+fn filter_tooltip_ui(
+    ui: &mut egui::Ui,
+    sector_name: &str,
+    hits: &[FilterHit],
+    universe: &Universe,
+    world: Option<&World>,
+    ownerless_fid: Option<FactionId>,
+) {
+    ui.strong(sector_name);
+    for hit in hits {
+        ui.separator();
+        match hit {
+            FilterHit::Entity(eid) => {
+                let Some(world) = world else { continue };
+                let name = crate::colors::resolve_entity_label_without_code(world, universe, *eid);
+                if !name.is_empty() {
+                    ui.label(name);
+                }
+                if let Some(code) = world.codes.get(eid) {
+                    ui.weak(format!("id: {code}"));
+                }
+                // Faction line — skipped for ownerless (free) ships.
+                if let Some(fid) = world.factions.get(eid) {
+                    if Some(*fid) != ownerless_fid {
+                        if let Some(meta) = universe.faction_table.get(fid) {
+                            ui.weak(&meta.display_name);
+                        }
+                    }
+                }
+            }
+            FilterHit::Resource(res) => {
+                let ware = universe
+                    .ware_names
+                    .get(&res.ware)
+                    .cloned()
+                    .unwrap_or_else(|| title_case(&res.ware));
+                ui.label(format!("{ware} — {} · {}", res.tier.label(), res.amount));
+            }
+        }
+    }
+}
+
+/// Title-case a lowercase ware id as a display fallback (e.g. `"ore"` → `"Ore"`).
+fn title_case(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 /// Returns quadratic bezier control point in universe space, or None if straight.
@@ -212,6 +268,7 @@ impl MapView {
         universe: &Universe,
         world: Option<&World>,
         selected: Option<SectorId>,
+        filter: Option<&HashMap<SectorId, Vec<FilterHit>>>,
     ) -> MapViewResponse {
         // Leave a 4 px gap on the right so the side panel's resize handle stays hittable.
         let avail = ui.available_size() - egui::vec2(4.0, 0.0);
@@ -254,6 +311,10 @@ impl MapView {
             .double_clicked()
             .then(|| response.interact_pointer_pos())
             .flatten();
+        // Pointer position for filter hover tooltips (only meaningful when a
+        // filter is active).
+        let hover_pos = filter.and_then(|_| response.hover_pos());
+        let ownerless_fid = universe.faction_strings.get("ownerless").copied();
 
         // Compute sector screen positions: cluster_center projected + per-sector
         // hex offset scaled by hex_r so sectors fit nicely inside the cluster hex
@@ -404,8 +465,17 @@ impl MapView {
             } else {
                 theme::BORDER
             };
+            // In an active filter, sectors that don't match are greyed out.
+            let filtered_out = filter.map(|f| !f.contains_key(&sector.id)).unwrap_or(false);
             let fill_color = if is_selected {
                 egui::Color32::from_rgba_unmultiplied(124, 58, 237, 80)
+            } else if filtered_out {
+                egui::Color32::from_rgba_unmultiplied(70, 70, 75, 60)
+            } else if filter.is_some() {
+                // Active filter + sector matches → one uniform "match" colour
+                // instead of the faction tint, so matches read at a glance.
+                let m = theme::FILTER_MATCH;
+                egui::Color32::from_rgba_unmultiplied(m.r(), m.g(), m.b(), 160)
             } else if let Some(fid) = sector.faction {
                 faction_fill(universe, fid)
             } else {
@@ -451,6 +521,23 @@ impl MapView {
             if let Some(ptr) = dbl_clicked_pos {
                 if (ptr - screen_pos).length() < hit_r {
                     double_clicked_sector = Some(sector.id);
+                }
+            }
+
+            // Filter hover tooltip: list this sector's matched items.
+            if let (Some(ptr), Some(hits)) = (hover_pos, filter.and_then(|f| f.get(&sector.id))) {
+                if (ptr - screen_pos).length() < hit_r {
+                    let layer = ui.layer_id();
+                    egui::Tooltip::always_open(
+                        ui.ctx().clone(),
+                        layer,
+                        egui::Id::new("sector_filter_tip"),
+                        egui::PopupAnchor::Pointer,
+                    )
+                    .at_pointer()
+                    .show(|ui| {
+                        filter_tooltip_ui(ui, &sector.name, hits, universe, world, ownerless_fid);
+                    });
                 }
             }
 

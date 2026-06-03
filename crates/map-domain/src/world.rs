@@ -1,6 +1,6 @@
 use crate::ids::{FactionId, SectorId};
 use glam::Vec3;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub type EntityId = u32;
 
@@ -43,6 +43,20 @@ pub struct World {
     /// Resolved at display time so the station shows e.g. "Microchip
     /// Production" instead of the generic basename "Factory".
     pub production_modules: HashMap<EntityId, String>,
+    /// Stations carrying a wharf build-module (builds S/M ships). Drives the
+    /// "Wharfs" map filter.
+    pub wharf_stations: HashSet<EntityId>,
+    /// Stations carrying a shipyard build-module (builds L/XL ships / carriers).
+    /// Drives the "Shipyards" map filter.
+    pub shipyard_stations: HashSet<EntityId>,
+    /// Per-entity `nameindex` attribute from the save (e.g. 1, 2, …). The game
+    /// renders this as a trailing roman numeral on generated names ("… I").
+    /// Absent for entities the game didn't number.
+    pub name_index: HashMap<EntityId, u32>,
+    /// Per-ship `job` id from the save (lowercase, e.g.
+    /// "argon_construction_vessel_xl_focused"). NPC ships are prefixed in-game
+    /// with their job's display name; resolved via `Universe.job_names`.
+    pub entity_jobs: HashMap<EntityId, String>,
 }
 
 impl World {

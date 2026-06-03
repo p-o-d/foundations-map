@@ -51,6 +51,21 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                 if let Some(p) = build_pending(e, comp_depth, stack.last().map(|sp| sp.id)) {
                     stack.push(p);
                 }
+                // A station's wharf/shipyard identity comes from its build
+                // modules, which appear as nested `<component>` macros. Attribute
+                // the flag to the nearest enclosing station (skip docked ships).
+                if let Some(kind) = attr_str(e, b"macro").as_deref().and_then(build_module_kind) {
+                    if let Some(station) = stack
+                        .iter_mut()
+                        .rev()
+                        .find(|p| p.kind == LiveObjectKind::Station)
+                    {
+                        match kind {
+                            BuildKind::Wharf => station.is_wharf = true,
+                            BuildKind::Shipyard => station.is_shipyard = true,
+                        }
+                    }
+                }
             }
             Ok(Event::End(ref e)) if e.name().as_ref() == b"component" => {
                 if let Some(top) = stack.last() {
@@ -87,11 +102,31 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                             trade_offers: std::mem::take(&mut p.trade_offers),
                             display_name_ref: p.display_name_ref.take(),
                             production_module_macro: p.production_module_macro.take(),
+                            is_wharf: p.is_wharf,
+                            is_shipyard: p.is_shipyard,
+                            name_index: p.name_index,
+                            job: p.job.take(),
                         });
                     }
                 }
                 comp_stack.pop();
                 comp_depth = comp_depth.saturating_sub(1);
+            }
+            // A self-closing build-module `<component .../>`: detect only, do not
+            // touch the depth/zone stacks (there is no matching End event).
+            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"component" => {
+                if let Some(kind) = attr_str(e, b"macro").as_deref().and_then(build_module_kind) {
+                    if let Some(station) = stack
+                        .iter_mut()
+                        .rev()
+                        .find(|p| p.kind == LiveObjectKind::Station)
+                    {
+                        match kind {
+                            BuildKind::Wharf => station.is_wharf = true,
+                            BuildKind::Shipyard => station.is_shipyard = true,
+                        }
+                    }
+                }
             }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"offset" => {
                 offset_depth = Some(comp_depth);
@@ -164,6 +199,18 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                     }
                 }
             }
+            // `<source job="..." class="job"/>`: the NPC job that spawned this
+            // ship, attributed to the nearest enclosing entity. The game prefixes
+            // generated names with the job's display name ("Builder Ship …").
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"source" => {
+                if let Some(job) = attr_str(e, b"job") {
+                    if let Some(top) = stack.last_mut() {
+                        if top.job.is_none() {
+                            top.job = Some(job.to_lowercase());
+                        }
+                    }
+                }
+            }
             Ok(Event::Eof) => break,
             Err(_) => break,
             _ => {}
@@ -184,6 +231,10 @@ struct Pending {
     trade_offers: Vec<TradeOffer>,
     display_name_ref: Option<String>,
     production_module_macro: Option<String>,
+    is_wharf: bool,
+    is_shipyard: bool,
+    name_index: Option<u32>,
+    job: Option<String>,
 }
 
 /// One open `<component>` while parsing. Tracks its own `<offset>` (km) and, if
@@ -192,6 +243,36 @@ struct Pending {
 struct CompFrame {
     offset: Option<Vec3>,
     zone_macro: Option<String>,
+}
+
+/// A build module that identifies a station as a wharf or shipyard.
+#[derive(Clone, Copy)]
+enum BuildKind {
+    Wharf,
+    Shipyard,
+}
+
+/// Classify a component macro as a wharf/shipyard build module. Wharfs build S/M
+/// ships (`buildmodule_*_ships_s/m_*`), shipyards build L/XL ships and carriers
+/// (`buildmodule_*_ships_l/xl_*`, `buildmodule_*_carrier_*`). The Xenon shipyard
+/// is also recognised by its station macro `station_xen_shipyard_*`.
+fn build_module_kind(macro_lc: &str) -> Option<BuildKind> {
+    let m = macro_lc.to_lowercase();
+    if m.contains("buildmodule") {
+        if m.contains("ships_s") || m.contains("ships_m") {
+            return Some(BuildKind::Wharf);
+        }
+        if m.contains("ships_l") || m.contains("ships_xl") || m.contains("carrier") {
+            return Some(BuildKind::Shipyard);
+        }
+    }
+    if m.contains("shipyard") {
+        return Some(BuildKind::Shipyard);
+    }
+    if m.contains("wharf") {
+        return Some(BuildKind::Wharf);
+    }
+    None
 }
 
 fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Option<Pending> {
@@ -214,6 +295,21 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
     // Stations: prefer `name=` if present, else `basename=`.
     // Ships:    use `name=`. (Ships do not carry `basename=`.)
     let display_name_ref = name_attr.or(basename_attr);
+    // `nameindex` → trailing roman numeral on generated names ("… I"). The
+    // `job` that prefixes NPC ship names comes from a nested `<source>`, not an
+    // attribute here, so it starts as None and is filled in during the walk.
+    let name_index = attr_str(e, b"nameindex").and_then(|s| s.parse().ok());
+
+    // The station's own macro can already mark it (e.g. the Xenon shipyard,
+    // whose ship-build capability lives in a single fixed macro).
+    let (mut is_wharf, mut is_shipyard) = (false, false);
+    if kind == LiveObjectKind::Station {
+        match build_module_kind(&macro_name) {
+            Some(BuildKind::Wharf) => is_wharf = true,
+            Some(BuildKind::Shipyard) => is_shipyard = true,
+            None => {}
+        }
+    }
 
     Some(Pending {
         open_depth: depth,
@@ -226,6 +322,10 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         trade_offers: Vec::new(),
         display_name_ref,
         production_module_macro: None,
+        is_wharf,
+        is_shipyard,
+        name_index,
+        job: None,
     })
 }
 
@@ -311,6 +411,35 @@ mod tests {
         assert_eq!(ship.kind, map_domain::world::LiveObjectKind::ShipLarge);
         assert!((ship.position.x - 1.0).abs() < 1e-3);
         assert!((ship.position.z - 2.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn detects_wharf_and_shipyard_build_modules() {
+        // Station A holds a shipyard module (builds L ships); station B a wharf
+        // module (builds M ships). A docked ship sits inside A and must not
+        // absorb the station's flag.
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="zone">
+    <component class="station" macro="station_arg_shipyard" owner="argon" id="[0x100]">
+      <offset><position x="0" y="0" z="0"/></offset>
+      <component class="buildmodule" macro="buildmodule_gen_ships_l_macro" id="[0x150]"/>
+      <component class="ship_s" macro="ship_arg_s_01" owner="argon" id="[0x160]">
+        <offset><position x="0" y="0" z="0"/></offset>
+      </component>
+    </component>
+    <component class="station" macro="station_arg_wharf" owner="argon" id="[0x200]">
+      <offset><position x="0" y="0" z="0"/></offset>
+      <component class="buildmodule" macro="buildmodule_gen_ships_m_dockarea_01_macro" id="[0x250]"/>
+    </component>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let a = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert!(a.is_shipyard && !a.is_wharf);
+        let docked = out.iter().find(|r| r.id == 0x160).unwrap();
+        assert!(!docked.is_shipyard && !docked.is_wharf);
+        let b = out.iter().find(|r| r.id == 0x200).unwrap();
+        assert!(b.is_wharf && !b.is_shipyard);
     }
 
     #[test]
@@ -510,6 +639,30 @@ mod tests {
 
         let pod = out.iter().find(|r| r.id == 0x40).unwrap();
         assert_eq!(pod.display_name_ref, None);
+    }
+
+    #[test]
+    fn captures_name_index_and_job_source() {
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="ship_xl" macro="ship_arg_xl_builder_01_a_macro"
+             code="XWX-653" owner="argon" id="[0x10]">
+    <offset><position x="0" y="0" z="0"/></offset>
+    <source job="Argon_Construction_Vessel" class="job"/>
+  </component>
+  <component class="station" macro="station_gen_factory_base_01_macro"
+             code="BPF-030" owner="argon" nameindex="3" id="[0x20]">
+    <offset><position x="0" y="0" z="0"/></offset>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let ship = out.iter().find(|r| r.id == 0x10).unwrap();
+        // Job is lowercased; nameindex absent here.
+        assert_eq!(ship.job.as_deref(), Some("argon_construction_vessel"));
+        assert_eq!(ship.name_index, None);
+
+        let station = out.iter().find(|r| r.id == 0x20).unwrap();
+        assert_eq!(station.name_index, Some(3));
+        assert_eq!(station.job, None);
     }
 
     #[test]

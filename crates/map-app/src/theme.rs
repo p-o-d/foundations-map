@@ -9,6 +9,8 @@ pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(224, 228, 240);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(122, 138, 180);
 pub const BORDER: Color32 = Color32::from_rgb(42, 45, 61);
 pub const GATE_GREEN: Color32 = Color32::from_rgb(42, 170, 106);
+/// Fill for sectors matching an active map filter (replaces faction colour).
+pub const FILTER_MATCH: Color32 = Color32::from_rgb(125, 230, 255); // bright cyan
 #[allow(dead_code)]
 pub const SHIP_YELLOW: Color32 = Color32::from_rgb(244, 180, 74);
 #[allow(dead_code)]

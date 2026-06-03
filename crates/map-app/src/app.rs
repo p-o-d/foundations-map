@@ -5,6 +5,7 @@ use crate::renderer::camera::OrbitCamera;
 use crate::ui::{
     map_view::MapView, sector_panel::SectorPanel, sector_view::SectorView3D, top_bar::TopBar,
 };
+use map_domain::filter::MapFilterMode;
 use map_domain::universe::Universe;
 use map_domain::view::ViewMode;
 use map_domain::world::{SnapshotMeta, World};
@@ -12,6 +13,7 @@ use map_domain::world::{SnapshotMeta, World};
 pub struct App {
     pub universe: Universe,
     pub view_mode: ViewMode,
+    pub filter_mode: MapFilterMode,
     pub camera: OrbitCamera,
     pub snapshot: Option<(SnapshotMeta, World)>,
     pub snapshot_loading: bool,
@@ -47,6 +49,7 @@ impl App {
         let mut app = Self {
             universe,
             view_mode: ViewMode::initial(),
+            filter_mode: MapFilterMode::Normal,
             camera: OrbitCamera::default(),
             snapshot: None,
             // Start in loading state — the initial save parse fires from main()
@@ -176,9 +179,13 @@ impl eframe::App for App {
                     self.snapshot_loading,
                     &self.universe.available_locales,
                     self.settings.locale,
+                    self.filter_mode,
                 );
                 refresh_clicked = resp.refresh_clicked;
                 locale_change = resp.locale_changed_to;
+                if let Some(mode) = resp.filter_changed_to {
+                    self.filter_mode = mode;
+                }
             });
         if let Some(new_locale) = locale_change {
             if let Some(game_dir) = map_io::game_path::detect() {
@@ -333,12 +340,15 @@ impl eframe::App for App {
                     }
                 }
                 ViewMode::UniverseMap { .. } => {
-                    let mvr = self.map_view.show(
-                        ui,
-                        &self.universe,
-                        self.snapshot.as_ref().map(|(_, w)| w),
-                        selected,
-                    );
+                    // Compute the active map filter (matched sectors → hits).
+                    // `None` for Normal mode means "no greying, no tooltips".
+                    let world = self.snapshot.as_ref().map(|(_, w)| w);
+                    let filter = (self.filter_mode != MapFilterMode::Normal).then(|| {
+                        map_domain::filter::matched_sectors(self.filter_mode, &self.universe, world)
+                    });
+                    let mvr =
+                        self.map_view
+                            .show(ui, &self.universe, world, selected, filter.as_ref());
                     if let Some(sector_id) = mvr.double_clicked_sector {
                         let positions: Vec<_> = self
                             .universe

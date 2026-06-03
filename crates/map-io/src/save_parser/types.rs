@@ -36,6 +36,14 @@ pub struct EntityRecord {
     pub trade_offers: Vec<TradeOffer>,
     pub display_name_ref: Option<String>,
     pub production_module_macro: Option<String>,
+    /// Station carries a wharf build-module (builds S/M ships).
+    pub is_wharf: bool,
+    /// Station carries a shipyard build-module (builds L/XL ships / carriers).
+    pub is_shipyard: bool,
+    /// `nameindex` attribute → trailing roman numeral on generated names.
+    pub name_index: Option<u32>,
+    /// `job` id (lowercase) → job-name prefix for NPC ships.
+    pub job: Option<String>,
 }
 
 #[cfg(test)]
@@ -68,6 +76,10 @@ mod tests {
             trade_offers: vec![],
             display_name_ref: Some("{20102,1701}".into()),
             production_module_macro: None,
+            is_wharf: false,
+            is_shipyard: false,
+            name_index: None,
+            job: None,
         };
         assert_eq!(e.id, 0x100);
         assert_eq!(e.display_name_ref.as_deref(), Some("{20102,1701}"));
