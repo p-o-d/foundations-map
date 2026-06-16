@@ -40,10 +40,14 @@ pub struct EntityRecord {
     pub is_wharf: bool,
     /// Station carries a shipyard build-module (builds L/XL ships / carriers).
     pub is_shipyard: bool,
+    /// Station macro identifies it as a trading station (`tradestation`).
+    pub is_trade: bool,
     /// `nameindex` attribute → trailing roman numeral on generated names.
     pub name_index: Option<u32>,
     /// `job` id (lowercase) → job-name prefix for NPC ships.
     pub job: Option<String>,
+    /// Entity carries `state="wreck"` — a destroyed hull, not a live ship.
+    pub is_wreck: bool,
 }
 
 #[cfg(test)]
@@ -78,8 +82,10 @@ mod tests {
             production_module_macro: None,
             is_wharf: false,
             is_shipyard: false,
+            is_trade: false,
             name_index: None,
             job: None,
+            is_wreck: false,
         };
         assert_eq!(e.id, 0x100);
         assert_eq!(e.display_name_ref.as_deref(), Some("{20102,1701}"));

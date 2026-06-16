@@ -234,26 +234,27 @@ fn draw_icons_2d(
         ))
     };
 
-    let emit = |screen: Pos2, icon: IconId, faction_color: egui::Color32, selected: bool| {
-        let (half, stroke) = if selected {
-            (icons::HALF_SELECTED, icons::STROKE_SELECTED)
-        } else {
-            (icons::HALF_NORMAL, icons::STROKE_NORMAL)
-        };
-        let frame_color = if selected {
-            icons::SELECTION_COLOR
-        } else {
-            faction_color
-        };
-        match icon.super_category() {
-            SuperCategory::Station => {
-                icons::draw_station_frame(painter, screen, half, stroke, frame_color)
+    let emit =
+        |screen: Pos2, icon: IconId, faction_color: egui::Color32, selected: bool, wreck: bool| {
+            let (half, stroke) = if selected {
+                (icons::HALF_SELECTED, icons::STROKE_SELECTED)
+            } else {
+                (icons::HALF_NORMAL, icons::STROKE_NORMAL)
+            };
+            let frame_color = if selected {
+                icons::SELECTION_COLOR
+            } else {
+                faction_color
+            };
+            match icon.super_category() {
+                SuperCategory::Station => {
+                    icons::draw_station_frame(painter, screen, half, stroke, frame_color)
+                }
+                SuperCategory::Ship => {} // ships render glyph only, no frame
+                SuperCategory::Static => icons::draw_static_frame(painter, screen, half, stroke),
             }
-            SuperCategory::Ship => {} // ships render glyph only, no frame
-            SuperCategory::Static => icons::draw_static_frame(painter, screen, half, stroke),
-        }
-        icons::draw_glyph(painter, icon, screen, half, frame_color);
-    };
+            icons::draw_glyph(painter, icon, screen, half, frame_color, wreck);
+        };
 
     // Static objects.
     for obj in &sector.static_objects {
@@ -267,7 +268,7 @@ fn draw_icons_2d(
             .faction
             .map(|f| crate::colors::faction_color(universe, f))
             .unwrap_or(crate::theme::TEXT_MUTED);
-        emit(screen, icon, ring, selected_obj == Some(obj.id));
+        emit(screen, icon, ring, selected_obj == Some(obj.id), false);
     }
 
     // Live entities (top-level only).
@@ -301,7 +302,8 @@ fn draw_icons_2d(
                 .copied()
                 .map(|f| crate::colors::faction_color(universe, f))
                 .unwrap_or(crate::theme::TEXT_MUTED);
-            emit(screen, icon, ring, selected_entity == Some(eid));
+            let wreck = world.wreck_entities.contains(&eid);
+            emit(screen, icon, ring, selected_entity == Some(eid), wreck);
         }
     }
 }

@@ -49,6 +49,9 @@ pub struct World {
     /// Stations carrying a shipyard build-module (builds L/XL ships / carriers).
     /// Drives the "Shipyards" map filter.
     pub shipyard_stations: HashSet<EntityId>,
+    /// Trading stations (station macro contains `tradestation`). Drives the
+    /// "Trade stations" map filter.
+    pub trade_stations: HashSet<EntityId>,
     /// Per-entity `nameindex` attribute from the save (e.g. 1, 2, …). The game
     /// renders this as a trailing roman numeral on generated names ("… I").
     /// Absent for entities the game didn't number.
@@ -57,6 +60,9 @@ pub struct World {
     /// "argon_construction_vessel_xl_focused"). NPC ships are prefixed in-game
     /// with their job's display name; resolved via `Universe.job_names`.
     pub entity_jobs: HashMap<EntityId, String>,
+    /// Entities flagged `state="wreck"` in the save — destroyed hulls. Rendered
+    /// with a hatched ("zebra") fill instead of a solid faction colour.
+    pub wreck_entities: HashSet<EntityId>,
 }
 
 impl World {

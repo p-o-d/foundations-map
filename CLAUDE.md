@@ -144,7 +144,7 @@ pub struct StaticObject {
 ## Map Filters (`map-domain::filter`)
 
 Top-bar "Filter" dropdown switches the 2D map between modes (`MapFilterMode`:
-Normal / Wharfs / Shipyards / Resources / Free ships). In a non-Normal mode,
+Normal / Wharfs / Shipyards / Trade stations / Resources / Free ships). In a non-Normal mode,
 sectors that don't match are greyed (`RGBA(70,70,75,60)`); matching sectors keep
 their faction colour and show a hover tooltip listing the matched items.
 
@@ -154,6 +154,7 @@ is pure; the app resolves names/codes/faction for the tooltip. Data sources:
 | Mode | Source | Tooltip |
 |---|---|---|
 | Wharfs / Shipyards | `World.wharf_stations` / `shipyard_stations` — set in the save parser when a station carries a `buildmodule_*_ships_s/m` (wharf) or `_ships_l/xl`/`_carrier` (shipyard) module; Xenon shipyard matched by station macro | station name · in-game code · faction |
+| Trade stations | `World.trade_stations` — set when a station macro contains `tradestation` (e.g. `station_arg_tradestation_base_01_macro`); no build module involved | station name · in-game code · faction |
 | Free ships | live ship entities whose owner faction is `ownerless` | ship name · in-game code |
 | Resources | `Universe.sector_resources`, parsed from mapdefaults `<resourceareas>` (`sphere_<size>_<ware>_<tier>_<speed>`); see `parse_resource_areas_xml`. `combine_resources` merges same-ware areas → richest tier + summed area count | ware · tier · amount |
 

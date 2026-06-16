@@ -17,6 +17,7 @@ pub enum MapFilterMode {
     Normal,
     Wharfs,
     Shipyards,
+    TradeStations,
     Resources,
     FreeShips,
 }
@@ -27,16 +28,18 @@ impl MapFilterMode {
             MapFilterMode::Normal => "Normal",
             MapFilterMode::Wharfs => "Wharfs",
             MapFilterMode::Shipyards => "Shipyards",
+            MapFilterMode::TradeStations => "Trade stations",
             MapFilterMode::Resources => "Resources",
             MapFilterMode::FreeShips => "Free ships",
         }
     }
 
-    pub fn all() -> [MapFilterMode; 5] {
+    pub fn all() -> [MapFilterMode; 6] {
         [
             MapFilterMode::Normal,
             MapFilterMode::Wharfs,
             MapFilterMode::Shipyards,
+            MapFilterMode::TradeStations,
             MapFilterMode::Resources,
             MapFilterMode::FreeShips,
         ]
@@ -65,12 +68,12 @@ pub fn matched_sectors(
     let mut out: HashMap<SectorId, Vec<FilterHit>> = HashMap::new();
     match mode {
         MapFilterMode::Normal => {}
-        MapFilterMode::Wharfs | MapFilterMode::Shipyards => {
+        MapFilterMode::Wharfs | MapFilterMode::Shipyards | MapFilterMode::TradeStations => {
             let Some(world) = world else { return out };
-            let set = if mode == MapFilterMode::Wharfs {
-                &world.wharf_stations
-            } else {
-                &world.shipyard_stations
+            let set = match mode {
+                MapFilterMode::Wharfs => &world.wharf_stations,
+                MapFilterMode::Shipyards => &world.shipyard_stations,
+                _ => &world.trade_stations,
             };
             for &eid in set {
                 if let Some(&sector) = world.sectors.get(&eid) {

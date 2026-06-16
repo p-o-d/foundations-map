@@ -109,6 +109,10 @@ impl SectorPanel {
                             if world.parent_of(eid).is_some() {
                                 continue;
                             }
+                            // Wrecks are destroyed hulls — keep them off the list.
+                            if world.wreck_entities.contains(&eid) {
+                                continue;
+                            }
                             let bucket = match world.kinds.get(&eid) {
                                 Some(LiveObjectKind::Station) => "STATIONS",
                                 Some(LiveObjectKind::ShipExtraLarge)

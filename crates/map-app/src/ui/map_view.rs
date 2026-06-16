@@ -541,9 +541,14 @@ impl MapView {
                 }
             }
 
-            // Ship-count badge (drawn on top of hex + name)
+            // Ship-count badge (drawn on top of hex + name). Wrecks excluded.
             let count = world
-                .map(|w| w.entities_in_sector(sector.id).len())
+                .map(|w| {
+                    w.entities_in_sector(sector.id)
+                        .iter()
+                        .filter(|eid| !w.wreck_entities.contains(*eid))
+                        .count()
+                })
                 .unwrap_or(0);
             if count > 0 {
                 draw_count_badge(
@@ -563,6 +568,7 @@ impl MapView {
                     w.entities_in_sector(sector.id)
                         .iter()
                         .filter(|eid| w.factions.get(*eid).copied() == Some(pid))
+                        .filter(|eid| !w.wreck_entities.contains(*eid))
                         .filter(|eid| {
                             matches!(
                                 w.kinds.get(*eid),

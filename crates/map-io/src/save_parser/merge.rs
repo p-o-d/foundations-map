@@ -40,7 +40,7 @@ pub fn merge(
             let trade_offers = r.trade_offers;
             let display_name_ref = r.display_name_ref;
             let production_module_macro = r.production_module_macro;
-            let (is_wharf, is_shipyard) = (r.is_wharf, r.is_shipyard);
+            let (is_wharf, is_shipyard, is_trade) = (r.is_wharf, r.is_shipyard, r.is_trade);
             // Add the enclosing zone's sector-relative position (km) so live
             // objects share the same frame as static gates. Named static zones
             // carry a zero save offset and get their position from here; dynamic
@@ -79,11 +79,17 @@ pub fn merge(
             if is_shipyard {
                 world.shipyard_stations.insert(entity_id);
             }
+            if is_trade {
+                world.trade_stations.insert(entity_id);
+            }
             if let Some(ni) = r.name_index {
                 world.name_index.insert(entity_id, ni);
             }
             if let Some(job) = r.job {
                 world.entity_jobs.insert(entity_id, job);
+            }
+            if r.is_wreck {
+                world.wreck_entities.insert(entity_id);
             }
         }
     }
@@ -117,8 +123,10 @@ mod tests {
                 production_module_macro: None,
                 is_wharf: false,
                 is_shipyard: false,
+                is_trade: false,
                 name_index: None,
                 job: None,
+                is_wreck: false,
             },
             EntityRecord {
                 id: 0x11,
@@ -135,8 +143,10 @@ mod tests {
                 production_module_macro: None,
                 is_wharf: false,
                 is_shipyard: false,
+                is_trade: false,
                 name_index: None,
                 job: None,
+                is_wreck: false,
             },
         ];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
@@ -170,8 +180,10 @@ mod tests {
             production_module_macro: None,
             is_wharf: false,
             is_shipyard: false,
+            is_trade: false,
             name_index: None,
             job: None,
+            is_wreck: false,
         }];
         let sm: HashMap<String, SectorId> = HashMap::new();
         let mut fs = HashMap::new();
@@ -198,8 +210,10 @@ mod tests {
             production_module_macro: None,
             is_wharf: false,
             is_shipyard: false,
+            is_trade: false,
             name_index: None,
             job: None,
+            is_wreck: false,
         }];
         let mut fs = HashMap::new();
         let mut next = 1u32;
@@ -232,8 +246,10 @@ mod tests {
             production_module_macro: None,
             is_wharf: false,
             is_shipyard: false,
+            is_trade: false,
             name_index: None,
             job: None,
+            is_wreck: false,
         }];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
         sm.insert("sa".into(), SectorId(1));
@@ -264,8 +280,10 @@ mod tests {
             production_module_macro: Some("prod_gen_microchips_macro".into()),
             is_wharf: false,
             is_shipyard: false,
+            is_trade: false,
             name_index: None,
             job: None,
+            is_wreck: false,
         }];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
         sm.insert("sa".into(), SectorId(1));
@@ -297,8 +315,10 @@ mod tests {
                 production_module_macro: None,
                 is_wharf: true,
                 is_shipyard: false,
+                is_trade: false,
                 name_index: None,
                 job: None,
+                is_wreck: false,
             },
             EntityRecord {
                 id: 0xA2,
@@ -315,8 +335,10 @@ mod tests {
                 production_module_macro: None,
                 is_wharf: false,
                 is_shipyard: true,
+                is_trade: false,
                 name_index: None,
                 job: None,
+                is_wreck: false,
             },
         ];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
@@ -328,6 +350,60 @@ mod tests {
         assert!(world.wharf_stations.contains(&0xA1));
         assert!(!world.shipyard_stations.contains(&0xA1));
         assert!(world.shipyard_stations.contains(&0xA2));
+    }
+
+    #[test]
+    fn wreck_flag_propagated_to_world() {
+        let records = vec![
+            EntityRecord {
+                id: 0xDE,
+                parent_id: None,
+                macro_name: "ship_xen_xl_destroyer_01_a_macro".into(),
+                code: None,
+                kind: LiveObjectKind::ShipExtraLarge,
+                owner: Some("xenon".into()),
+                position: glam::Vec3::ZERO,
+                sector_macro: "sa".into(),
+                zone_macro: None,
+                trade_offers: vec![],
+                display_name_ref: None,
+                production_module_macro: None,
+                is_wharf: false,
+                is_shipyard: false,
+                is_trade: false,
+                name_index: None,
+                job: None,
+                is_wreck: true,
+            },
+            EntityRecord {
+                id: 0xA1,
+                parent_id: None,
+                macro_name: "ship_arg_s_scout_01_a_macro".into(),
+                code: None,
+                kind: LiveObjectKind::ShipSmall,
+                owner: Some("argon".into()),
+                position: glam::Vec3::ZERO,
+                sector_macro: "sa".into(),
+                zone_macro: None,
+                trade_offers: vec![],
+                display_name_ref: None,
+                production_module_macro: None,
+                is_wharf: false,
+                is_shipyard: false,
+                is_trade: false,
+                name_index: None,
+                job: None,
+                is_wreck: false,
+            },
+        ];
+        let mut sm: HashMap<String, SectorId> = HashMap::new();
+        sm.insert("sa".into(), SectorId(1));
+        let mut fs: HashMap<String, FactionId> = HashMap::new();
+        let mut next = 1u32;
+        let zp = HashMap::new();
+        let world = merge(vec![records], Some(&sm), &zp, &mut fs, &mut next);
+        assert!(world.wreck_entities.contains(&0xDE));
+        assert!(!world.wreck_entities.contains(&0xA1));
     }
 
     #[test]
@@ -347,8 +423,10 @@ mod tests {
             production_module_macro: None,
             is_wharf: false,
             is_shipyard: false,
+            is_trade: false,
             name_index: None,
             job: None,
+            is_wreck: false,
         }];
         let mut sm: HashMap<String, SectorId> = HashMap::new();
         sm.insert("sa".into(), SectorId(1));

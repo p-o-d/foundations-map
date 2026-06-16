@@ -104,8 +104,10 @@ pub fn parse_sector_chunk(slice: &[u8], sector_macro: &str) -> Vec<EntityRecord>
                             production_module_macro: p.production_module_macro.take(),
                             is_wharf: p.is_wharf,
                             is_shipyard: p.is_shipyard,
+                            is_trade: p.is_trade,
                             name_index: p.name_index,
                             job: p.job.take(),
+                            is_wreck: p.is_wreck,
                         });
                     }
                 }
@@ -233,8 +235,10 @@ struct Pending {
     production_module_macro: Option<String>,
     is_wharf: bool,
     is_shipyard: bool,
+    is_trade: bool,
     name_index: Option<u32>,
     job: Option<String>,
+    is_wreck: bool,
 }
 
 /// One open `<component>` while parsing. Tracks its own `<offset>` (km) and, if
@@ -299,15 +303,23 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
     // `job` that prefixes NPC ship names comes from a nested `<source>`, not an
     // attribute here, so it starts as None and is filled in during the walk.
     let name_index = attr_str(e, b"nameindex").and_then(|s| s.parse().ok());
+    // A destroyed hull carries `state="wreck"`; live entities have no state attr.
+    let is_wreck = attr_str(e, b"state").as_deref() == Some("wreck");
 
     // The station's own macro can already mark it (e.g. the Xenon shipyard,
     // whose ship-build capability lives in a single fixed macro).
     let (mut is_wharf, mut is_shipyard) = (false, false);
+    // Trading stations are identified by their station macro alone (e.g.
+    // `station_arg_tradestation_base_01_macro`); they carry no build module.
+    let mut is_trade = false;
     if kind == LiveObjectKind::Station {
         match build_module_kind(&macro_name) {
             Some(BuildKind::Wharf) => is_wharf = true,
             Some(BuildKind::Shipyard) => is_shipyard = true,
             None => {}
+        }
+        if macro_name.to_lowercase().contains("tradestation") {
+            is_trade = true;
         }
     }
 
@@ -324,8 +336,10 @@ fn build_pending(e: &BytesStart<'_>, depth: u32, parent_id: Option<u32>) -> Opti
         production_module_macro: None,
         is_wharf,
         is_shipyard,
+        is_trade,
         name_index,
         job: None,
+        is_wreck,
     })
 }
 
@@ -440,6 +454,50 @@ mod tests {
         assert!(!docked.is_shipyard && !docked.is_wharf);
         let b = out.iter().find(|r| r.id == 0x200).unwrap();
         assert!(b.is_wharf && !b.is_shipyard);
+    }
+
+    #[test]
+    fn detects_trade_station_by_macro() {
+        // Trading station identified by its macro alone (no build module). A
+        // plain factory in the same sector must not be flagged.
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="zone">
+    <component class="station" macro="station_arg_tradestation_base_01_macro" owner="argon" id="[0x100]">
+      <offset><position x="0" y="0" z="0"/></offset>
+    </component>
+    <component class="station" macro="station_gen_factory_base_01_macro" owner="argon" id="[0x200]">
+      <offset><position x="0" y="0" z="0"/></offset>
+    </component>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let trade = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert!(trade.is_trade && !trade.is_wharf && !trade.is_shipyard);
+        let factory = out.iter().find(|r| r.id == 0x200).unwrap();
+        assert!(!factory.is_trade);
+    }
+
+    #[test]
+    fn detects_wreck_state_on_ship() {
+        // A destroyed ship carries `state="wreck"`; a live one has no state attr.
+        let chunk: &[u8] = br#"<component class="sector" macro="m">
+  <component class="zone">
+    <component class="ship_xl" macro="ship_xen_xl_destroyer_01_a_macro" connection="space" state="wreck" owner="xenon" id="[0x100]">
+      <offset><position x="0" y="0" z="0"/></offset>
+    </component>
+    <component class="ship_s" macro="ship_arg_s_scout_01_a_macro" owner="argon" id="[0x200]">
+      <offset><position x="0" y="0" z="0"/></offset>
+    </component>
+  </component>
+</component>"#;
+        let out = parse_sector_chunk(chunk, "m");
+        let wreck = out.iter().find(|r| r.id == 0x100).unwrap();
+        assert!(
+            wreck.is_wreck,
+            "ship with state=\"wreck\" should be flagged"
+        );
+        let alive = out.iter().find(|r| r.id == 0x200).unwrap();
+        assert!(!alive.is_wreck, "ship with no state attr is alive");
     }
 
     #[test]
