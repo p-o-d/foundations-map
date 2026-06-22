@@ -29,6 +29,17 @@ pub enum SnapshotMessage {
 }
 
 fn main() -> eframe::Result<()> {
+    // Profiler server (feature `profiling`). Streams scope data to a standalone
+    // `puffin_viewer` over TCP. Kept alive for the whole process via the binding.
+    #[cfg(feature = "profiling")]
+    let _puffin_server = {
+        puffin::set_scopes_on(true);
+        let server = puffin_http::Server::new("127.0.0.1:8585")
+            .expect("failed to start puffin server");
+        eprintln!("[map] puffin server on 127.0.0.1:8585 — run: puffin_viewer --url 127.0.0.1:8585");
+        server
+    };
+
     // Attempt to load universe from game files
     let universe = load_universe(44);
 

@@ -17,3 +17,13 @@ bytemuck = { version = "1", features = ["derive"] }
 dirs = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Optional profiler. Off by default (zero runtime cost in normal builds).
+# Enable with `cargo run --features profiling`, then view the live flamegraph
+# in a standalone window:  puffin_viewer --url 127.0.0.1:8585
+# (puffin_egui can't be embedded — it pins egui 0.33, we run 0.34.)
+puffin = { version = "0.20", optional = true }
+puffin_http = { version = "0.17", optional = true }
+
+[features]
+profiling = ["dep:puffin", "dep:puffin_http"]

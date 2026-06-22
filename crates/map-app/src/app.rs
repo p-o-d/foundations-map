@@ -108,6 +108,13 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Mark a new profiler frame + scope the whole UI pass. No-op without
+        // the `profiling` feature.
+        #[cfg(feature = "profiling")]
+        puffin::GlobalProfiler::lock().new_frame();
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("App::ui");
+
         // Drain any pending save-parse results.
         while let Ok(msg) = self.snapshot_rx.try_recv() {
             match msg {
@@ -293,6 +300,8 @@ impl eframe::App for App {
 
             match self.view_mode.clone() {
                 ViewMode::SectorView { sector, .. } => {
+                    #[cfg(feature = "profiling")]
+                    puffin::profile_scope!("sector_view_3d");
                     // Compute positions before calling show to avoid double-borrow of self.universe
                     let sec = self.universe.sector(sector);
                     let sv_resp = self.sector_view.show(
@@ -340,6 +349,8 @@ impl eframe::App for App {
                     }
                 }
                 ViewMode::UniverseMap { .. } => {
+                    #[cfg(feature = "profiling")]
+                    puffin::profile_scope!("map_view_2d");
                     // Compute the active map filter (matched sectors → hits).
                     // `None` for Normal mode means "no greying, no tooltips".
                     let world = self.snapshot.as_ref().map(|(_, w)| w);

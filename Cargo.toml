@@ -12,3 +12,10 @@ resolver = "2"
 [profile.dev.package."*"]
 opt-level = 3
 debug = false
+
+# Release-optimized but keeps debug symbols, so external profilers
+# (heaptrack, samply, perf) show real function names. Build with
+# `cargo build --profile profiling` / `cargo run --profile profiling`.
+[profile.profiling]
+inherits = "release"
+debug = true
