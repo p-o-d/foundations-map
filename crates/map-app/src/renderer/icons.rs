@@ -5,7 +5,7 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
-use crate::renderer::atlas::IconId;
+use crate::renderer::atlas::{IconId, SuperCategory};
 
 pub const HALF_NORMAL: f32 = 11.0; // 22 px total
 pub const HALF_SELECTED: f32 = 15.0; // 30 px total
@@ -36,7 +36,8 @@ pub fn draw_static_frame(painter: &Painter, center: Pos2, half: f32, stroke: f32
 /// in screen pixels (HALF_NORMAL or HALF_SELECTED). `frame_color` is the
 /// faction tint (or selection yellow) — used for accent details inside each
 /// glyph and for the ship hull fill. `wreck` switches ship hulls from a solid
-/// fill to a 45° hatched ("zebra") fill; it has no effect on other icons.
+/// fill to a 45° hatched ("zebra") fill, and replaces a station's detail glyph
+/// with a hatched square inside its frame; it has no effect on static icons.
 pub fn draw_glyph(
     painter: &Painter,
     icon: IconId,
@@ -47,6 +48,12 @@ pub fn draw_glyph(
 ) {
     let s = half / 8.0;
     let white = Color32::WHITE;
+
+    // Wreck stations: skip the detail glyph, hatch the frame interior instead.
+    if wreck && icon.super_category() == SuperCategory::Station {
+        hatched_square(painter, center, half, frame_color);
+        return;
+    }
 
     match icon {
         IconId::Factory => glyph_factory(painter, center, s, white, frame_color),
@@ -475,6 +482,22 @@ fn path_hatched(p: &Painter, c: Pos2, s: f32, col: Color32, pts: &[(f32, f32)]) 
     }));
 }
 
+/// 45° hatch ("zebra") fill of the axis-aligned square of half-size `half`
+/// centred at `c` — the wreck marker for stations (drawn inside the frame
+/// already painted by the caller, so no extra outline here).
+fn hatched_square(p: &Painter, c: Pos2, half: f32, col: Color32) {
+    let pts = [
+        Pos2::new(c.x - half, c.y - half),
+        Pos2::new(c.x + half, c.y - half),
+        Pos2::new(c.x + half, c.y + half),
+        Pos2::new(c.x - half, c.y + half),
+    ];
+    let stroke = Stroke::new((0.11 * half).max(1.0), col);
+    for seg in hatch_segments(&pts, 0.30 * half) {
+        p.line_segment(seg, stroke);
+    }
+}
+
 /// Fill a ship hull: solid faction colour when alive, hatched when a wreck.
 fn ship_hull(p: &Painter, c: Pos2, s: f32, col: Color32, wreck: bool, pts: &[(f32, f32)]) {
     if wreck {
@@ -520,6 +543,34 @@ mod tests {
                 assert!(
                     p.x >= -eps && p.x <= 10.0 + eps && p.y >= -eps && p.y <= 10.0 + eps,
                     "hatch point {:?} outside square",
+                    p
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hatched_square_segments_cover_frame_interior() {
+        // The station wreck marker hatches the frame square (half-size 11).
+        // Segments must be non-empty and lie within the square.
+        let half = 11.0;
+        let pts = [
+            Pos2::new(-half, -half),
+            Pos2::new(half, -half),
+            Pos2::new(half, half),
+            Pos2::new(-half, half),
+        ];
+        let segs = hatch_segments(&pts, 0.30 * half);
+        assert!(
+            !segs.is_empty(),
+            "expected hatch segments for station wreck"
+        );
+        let eps = 1e-3;
+        for [a, b] in &segs {
+            for p in [a, b] {
+                assert!(
+                    p.x.abs() <= half + eps && p.y.abs() <= half + eps,
+                    "hatch point {:?} outside frame square",
                     p
                 );
             }
