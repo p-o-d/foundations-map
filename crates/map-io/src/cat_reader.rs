@@ -4,17 +4,18 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-/// Read a known set of files in a single parallel pass over the archives.
+/// Read *every* archive copy of each wanted path in a single parallel pass.
 ///
-/// Each cat index must still be fully line-scanned to compute byte offsets, but
-/// bytes are only read (and allocated) for paths in `wanted` — far cheaper than
-/// indexing all ~330k archive entries to fetch a few thousand. First archive
-/// wins on duplicates (main `01..08` before DLC `ext_*`), matching
-/// [`read_game_file`] resolution.
-pub fn read_files(
+/// Returns, per matched path, the bytes from each archive that holds it, in load
+/// order (main `01..08` before DLC `ext_*`). Used for files that DLCs override or
+/// extend and must all be merged (mapdefaults, god, factions, …). Each cat index
+/// is line-scanned exactly once to compute byte offsets, but bytes are only read
+/// (and allocated) for paths in `wanted` — far cheaper than indexing all ~330k
+/// archive entries to fetch a few.
+pub fn read_all_files(
     game_dir: &Path,
     wanted: &std::collections::HashSet<String>,
-) -> HashMap<String, Vec<u8>> {
+) -> HashMap<String, Vec<Vec<u8>>> {
     // Per-archive (in load order): matched (path, bytes) pairs.
     let per_archive: Vec<Vec<(String, Vec<u8>)>> = archive_sources(game_dir)
         .par_iter()
@@ -43,13 +44,28 @@ pub fn read_files(
         })
         .collect();
 
-    let mut result: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut result: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     for archive in per_archive {
         for (path, bytes) in archive {
-            result.entry(path).or_insert(bytes);
+            result.entry(path).or_default().push(bytes);
         }
     }
     result
+}
+
+/// Read a known set of files in a single parallel pass over the archives.
+///
+/// First archive wins on duplicates (main `01..08` before DLC `ext_*`), matching
+/// [`read_game_file`] resolution. Thin wrapper over [`read_all_files`] that keeps
+/// the first copy of each path.
+pub fn read_files(
+    game_dir: &Path,
+    wanted: &std::collections::HashSet<String>,
+) -> HashMap<String, Vec<u8>> {
+    read_all_files(game_dir, wanted)
+        .into_iter()
+        .filter_map(|(path, mut copies)| (!copies.is_empty()).then(|| (path, copies.swap_remove(0))))
+        .collect()
 }
 
 /// Enumerate (cat, dat) archive pairs: main `NN.cat` then each DLC `ext_NN.cat`,
@@ -95,44 +111,6 @@ fn parse_cat_line(line: &str) -> Option<(&str, u64)> {
     let path = &rest[..sep];
     let size: u64 = rest[sep + 1..].parse().ok()?;
     Some((path, size))
-}
-
-/// Read all occurrences of a path across main cats and all extension cats.
-/// Used when multiple archives supply the same file (e.g. each DLC's mapdefaults.xml).
-pub fn read_all_game_files(game_dir: &Path, internal_path: &str) -> Vec<Vec<u8>> {
-    let mut results = Vec::new();
-
-    for n in 1..=99u32 {
-        let cat_path = game_dir.join(format!("{:02}.cat", n));
-        if !cat_path.exists() {
-            break;
-        }
-        let dat_path = game_dir.join(format!("{:02}.dat", n));
-        if let Some(data) = search_cat(&cat_path, &dat_path, internal_path) {
-            results.push(data);
-        }
-    }
-
-    for ext_dir in std::fs::read_dir(game_dir.join("extensions"))
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.is_dir())
-    {
-        for n in 1..=99u32 {
-            let cat_path = ext_dir.join(format!("ext_{:02}.cat", n));
-            if !cat_path.exists() {
-                break;
-            }
-            let dat_path = ext_dir.join(format!("ext_{:02}.dat", n));
-            if let Some(data) = search_cat(&cat_path, &dat_path, internal_path) {
-                results.push(data);
-            }
-        }
-    }
-
-    results
 }
 
 /// Read a file from X4's cat/dat archive pairs.

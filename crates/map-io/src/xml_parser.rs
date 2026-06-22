@@ -94,11 +94,28 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         universe_files.len()
     );
 
+    // DLCs each ship their own copy of these library files; all copies must be
+    // read and merged. Fetch every copy of all of them in a single archive pass
+    // (was one full cat-index scan per file — O(files × archives × lines)).
+    let multi_paths: std::collections::HashSet<String> = [
+        "libraries/mapdefaults.xml",
+        "libraries/wares.xml",
+        "libraries/jobs.xml",
+        "index/macros.xml",
+        "libraries/factions.xml",
+        "libraries/colors.xml",
+        "libraries/god.xml",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let multi = crate::cat_reader::read_all_files(game_dir, &multi_paths);
+
     let mut name_refs = HashMap::new();
     // sector macro (lowercase) → mineable resource areas, from `<resourceareas>`.
     let mut resource_areas_by_macro: HashMap<String, Vec<map_domain::resources::SectorResource>> =
         HashMap::new();
-    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/mapdefaults.xml") {
+    for data in multi.get("libraries/mapdefaults.xml").into_iter().flatten() {
         let s = String::from_utf8_lossy(&data);
         name_refs.extend(parse_sector_name_refs_xml(&s)?);
         for (macro_lc, areas) in parse_resource_areas_xml(&s) {
@@ -118,7 +135,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         std::collections::HashMap::new();
     let mut ware_factory_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/wares.xml") {
+    for data in multi.get("libraries/wares.xml").into_iter().flatten() {
         for (k, v) in parse_ware_names_xml(&data, &translations) {
             ware_names.entry(k).or_insert(v);
         }
@@ -135,7 +152,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     // Job id → display name (e.g. "Builder Ship"). NPC ships prefix their
     // generated name with this. Multi-archive read for DLC; first wins.
     let mut job_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/jobs.xml") {
+    for data in multi.get("libraries/jobs.xml").into_iter().flatten() {
         for (k, v) in parse_jobs_xml(&data, &translations) {
             job_names.entry(k).or_insert(v);
         }
@@ -148,7 +165,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     // First-match-wins across main + DLC archives (matches mapdefaults pattern).
     let mut macro_index: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for data in crate::cat_reader::read_all_game_files(game_dir, "index/macros.xml") {
+    for data in multi.get("index/macros.xml").into_iter().flatten() {
         for (k, v) in crate::macro_index::parse_macros_index(&data) {
             macro_index.entry(k).or_insert(v);
         }
@@ -201,7 +218,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     // ---- Faction metadata: name + color from libraries/factions.xml + colors.xml.
     let mut faction_defs: std::collections::HashMap<String, crate::faction_parser::FactionDef> =
         std::collections::HashMap::new();
-    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/factions.xml") {
+    for data in multi.get("libraries/factions.xml").into_iter().flatten() {
         let text = String::from_utf8_lossy(&data);
         for (k, v) in crate::faction_parser::parse_factions_xml(&text) {
             faction_defs.entry(k).or_insert(v); // first occurrence wins (main loads first)
@@ -211,7 +228,7 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
         std::collections::HashMap::new();
     let mut mappings_map: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for data in crate::cat_reader::read_all_game_files(game_dir, "libraries/colors.xml") {
+    for data in multi.get("libraries/colors.xml").into_iter().flatten() {
         let text = String::from_utf8_lossy(&data);
         let (c, m) = crate::faction_parser::parse_colors_xml(&text);
         for (k, v) in c {
@@ -478,13 +495,13 @@ pub fn parse_galaxy_from_game(game_dir: &Path, locale: u32) -> Result<Universe, 
     eprintln!("[map] Non-gate objects loaded: {}", non_gate_counter);
 
     // Parse fixed objects from god.xml (main + all DLC extensions).
-    // Uses read_all_game_files since extensions supply additional god.xml entries.
+    // Uses the merged multi-archive read since extensions supply additional god.xml entries.
     let mut god_counter = 0u32;
     let sector_macro_to_id: HashMap<String, SectorId> = macro_to_id
         .iter()
         .map(|(k, v)| (k.to_lowercase(), *v))
         .collect();
-    for god_data in crate::cat_reader::read_all_game_files(game_dir, "libraries/god.xml") {
+    for god_data in multi.get("libraries/god.xml").into_iter().flatten() {
         let god_str = String::from_utf8_lossy(&god_data);
         for (sec_lower, x, y, z, kind, name, mac) in parse_god_xml(&god_str) {
             if let Some(&sec_id) = sector_macro_to_id.get(&sec_lower) {
